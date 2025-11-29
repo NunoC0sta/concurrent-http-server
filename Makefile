@@ -1,0 +1,13 @@
+CC=gcc
+CFLAGS=-Wall -Wextra -pthread -lrt
+
+SRC = src/main.c
+BIN = server
+
+all: $(BIN)
+
+$(BIN): $(SRC)
+	$(CC) $(CFLAGS) -o $(BIN) $(SRC)
+
+clean:
+	rm -f $(BIN)
