@@ -1,7 +1,7 @@
-CC=gcc
-CFLAGS=-Wall -Wextra -pthread -lrt
+CC = gcc
+CFLAGS = -Wall -Wextra -pthread -lrt
 
-SRC = src/main.c
+SRC = src/main.c src/master.c
 BIN = server
 
 all: $(BIN)
@@ -11,3 +11,6 @@ $(BIN): $(SRC)
 
 clean:
 	rm -f $(BIN)
+
+run: $(BIN)
+	./$(BIN)
