@@ -1,3 +1,6 @@
+#ifndef CONFIG_H // <-- Começa aqui
+#define CONFIG_H
+
 typedef struct {
     int port;
     char document_root[256];
@@ -8,3 +11,7 @@ typedef struct {
     int cache_size_mb;
     int timeout_seconds;
 } server_config_t;
+
+int load_config(const char* filename, server_config_t* config);
+
+#endif

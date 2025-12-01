@@ -1,7 +1,7 @@
 CC = gcc
 CFLAGS = -Wall -Wextra -pthread -lrt
 
-SRC = src/main.c src/master.c
+SRC = src/main.c src/master.c src/config.c
 BIN = server
 
 all: $(BIN)
