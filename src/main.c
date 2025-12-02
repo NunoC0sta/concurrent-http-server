@@ -6,23 +6,30 @@
 int main() {
     server_config_t config;
 
-    // Carregar configurações do ficheiro "server.conf"
-    // A função load_config está definida em src/config.c
+    // Load configuration from "server.conf"
     if (load_config("server.conf", &config) != 0) {
-        fprintf(stderr, "ERRO: Não foi possível ler o ficheiro 'server.conf'.\n");
-        fprintf(stderr, "Verifica se o ficheiro está na pasta correta.\n");
+        fprintf(stderr, "ERROR: Could not read 'server.conf'\n");
+        fprintf(stderr, "Check that the file exists and is readable.\n");
         return 1;
     }
 
-    printf("--- Configuração Carregada ---\n");
-    printf("Porta: %d\n", config.port);
+    printf("--- Configuration Loaded ---\n");
+    printf("Port: %d\n", config.port);
     printf("Workers: %d\n", config.num_workers);
-    printf("Threads por Worker: %d\n", config.threads_per_worker);
-    printf("------------------------------\n");
+    printf("Threads per Worker: %d\n", config.threads_per_worker);
+    printf("----------------------------\n");
 
-    printf("A iniciar servidor...\n");
+    // Initialize master (socket, shared memory, semaphores, fork workers)
+    if (master_init(&config) != 0) {
+        fprintf(stderr, "ERROR: Failed to initialize master\n");
+        return 1;
+    }
 
-    master_start(&config);
+    // Enter accept loop (blocks handling incoming connections)
+    master_accept_loop();
+
+    // Cleanup resources (this may never be reached in normal operation)
+    master_cleanup();
 
     return 0;
 }
