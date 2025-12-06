@@ -15,9 +15,9 @@ int load_config(const char* filename, server_config_t* config) {
         if (line[0] == '#' || line[0] == '\n') continue;
 
         if (sscanf(line, "%[^=]=%s", key, value) == 2) {
-            if (strcmp(key, "PORT") == 0) 
+            if (strcmp(key, "PORT") == 0)
                 config->port = atoi(value);
-            else if (strcmp(key, "NUM_WORKERS") == 0) 
+            else if (strcmp(key, "NUM_WORKERS") == 0)
                 config->num_workers = atoi(value);
             else if (strcmp(key, "THREADS_PER_WORKER") == 0)
                 config->threads_per_worker = atoi(value);
