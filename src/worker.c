@@ -1,158 +1,88 @@
 #define _POSIX_C_SOURCE 200809L
-#define _DEFAULT_SOURCE
 #include "worker.h"
 #include "thread_pool.h"
+#include "shared_mem.h"
+#include "semaphores.h"
 #include "http.h"
-#include "master.h"  /* For IPC access and stats functions */
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <fcntl.h>
 #include <signal.h>
-#include <errno.h>
-#include <pthread.h>
-#include <string.h>
-#include <time.h>
-#include <sys/socket.h>
+#include <sys/mman.h>
 
-static volatile sig_atomic_t g_stop = 0;
+static volatile int running = 1;
 
-static void term_handler(int sig) {
-    (void)sig;
-    g_stop = 1;
-}
-
-/* Worker state shared with threads */
+// Estrutura para passar args para as threads
 typedef struct {
+    shared_data_t* shm;
+    semaphores_t* sems;
+    server_config_t* config;
     int worker_id;
-    server_config_t *config;
-    ipc_handles_t *ipc;           /* IPC handles for stats */
-    int listen_fd;                 /* Shared listening socket */
-} worker_state_t;
+} worker_args_t;
 
-/**
- * Worker thread function
- * Each thread accepts connections directly from the shared listening socket
- */
-static void *worker_thread_fn(void *arg) {
-    worker_state_t *st = (worker_state_t*)arg;
+void* worker_thread_logic(void* arg) {
+    worker_args_t* args = (worker_args_t*)arg;
+    
+    while(running) {
+        //Espera haver algo na fila
+        if (sem_wait(args->sems->filled_slots) != 0) break;
 
-    printf("[WORKER %d THREAD %lu] Started\n",
-           st->worker_id, (unsigned long)pthread_self());
+        //Protege acesso à fila
+        if (sem_wait(args->sems->queue_mutex) != 0) break;
 
-    while (!g_stop) {
-        /* Accept connection directly from shared listening socket
-         * The kernel handles synchronization - only one thread gets each connection */
-        int client_fd = accept(st->listen_fd, NULL, NULL);
+        //Retira socket
+        connection_queue_t* q = &args->shm->queue;
+        int client_fd = q->sockets[q->front];
+        q->front = (q->front + 1) % MAX_QUEUE_SIZE;
+        q->count--;
 
-        if (client_fd < 0) {
-            if (errno == EINTR || g_stop) {
-                /* Interrupted by signal or shutdown requested */
-                printf("[WORKER %d THREAD %lu] Shutdown signal received\n",
-                       st->worker_id, (unsigned long)pthread_self());
-                break;
-            }
-            perror("[WORKER] accept failed");
-            continue;
-        }
+        //Liberta fila
+        sem_post(args->sems->queue_mutex);
+        sem_post(args->sems->empty_slots);
 
-        /* Check if we should stop */
-        if (g_stop) {
-            close(client_fd);
-            break;
-        }
+        sem_wait(args->sems->stats_mutex);
+        args->shm->stats.active_connections++;
+        sem_post(args->sems->stats_mutex);
 
-        printf("[WORKER %d THREAD %lu] Accepted connection fd=%d\n",
-               st->worker_id, (unsigned long)pthread_self(), client_fd);
+        //Processa
+        http_handle_client(client_fd, args->config->document_root, args->shm, args->sems);
 
-        /* Increment active connections counter */
-        stats_inc_active(st->ipc);
-
-        /* Handle the HTTP request */
-        http_handle_request(client_fd, st->config->document_root, st->ipc);
-
-        /* Decrement active connections counter */
-        stats_dec_active(st->ipc);
-
-        printf("[WORKER %d THREAD %lu] Finished handling fd=%d\n",
-               st->worker_id, (unsigned long)pthread_self(), client_fd);
+        //Fim da conexão
+        sem_wait(args->sems->stats_mutex);
+        args->shm->stats.active_connections--;
+        sem_post(args->sems->stats_mutex);
     }
-
-    printf("[WORKER %d THREAD %lu] Exiting\n",
-           st->worker_id, (unsigned long)pthread_self());
     return NULL;
 }
 
-/**
- * Worker process main function
- * - Attaches to IPC resources
- * - Creates thread pool
- * - Threads accept connections directly from shared listening socket
- * - Waits for termination signal
- */
-void worker_main(int worker_id, server_config_t *config, int listen_fd) {
-    printf("[WORKER %d] Started (pid=%d)\n", worker_id, getpid());
+void worker_main(int worker_id, server_config_t *config) {
+    int shm_fd = shm_open("/webserver_shm", O_RDWR, 0666);
+    shared_data_t* shm = mmap(NULL, sizeof(shared_data_t), PROT_READ|PROT_WRITE, MAP_SHARED, shm_fd, 0);
+    
+    semaphores_t sems;
+    sems.empty_slots = sem_open("/ws_empty", 0);
+    sems.filled_slots = sem_open("/ws_filled", 0);
+    sems.queue_mutex = sem_open("/ws_queue_mutex", 0);
+    sems.stats_mutex = sem_open("/ws_stats_mutex", 0);
+    sems.log_mutex = sem_open("/ws_log_mutex", 0);
 
-    /* Setup signal handlers */
-    struct sigaction sa;
-    sa.sa_handler = term_handler;
-    sigemptyset(&sa.sa_mask);
-    sa.sa_flags = 0;
-    sigaction(SIGINT, &sa, NULL);
-    sigaction(SIGTERM, &sa, NULL);
+    // Iniciar Thread Pool
+    worker_args_t args = {shm, &sems, config, worker_id};
+    thread_pool_t* pool = create_thread_pool(config->threads_per_worker);
 
-    /* Ignore SIGPIPE */
-    signal(SIGPIPE, SIG_IGN);
-
-    /* Attach to IPC resources (shared memory + semaphores) */
-    ipc_handles_t ipc;
-    if (ipc_attach(&ipc) != 0) {
-        fprintf(stderr, "[WORKER %d] Failed to attach to IPC\n", worker_id);
-        _exit(1);
-    }
-    printf("[WORKER %d] Attached to IPC successfully\n", worker_id);
-
-    /* Prepare worker state for threads */
-    worker_state_t st;
-    st.worker_id = worker_id;
-    st.config = config;
-    st.ipc = &ipc;
-    st.listen_fd = listen_fd;
-
-    int nthreads = (config->threads_per_worker > 0) ? config->threads_per_worker : 4;
-
-    /* Create thread pool */
-    thread_pool_t pool;
-    if (thread_pool_init(&pool, nthreads, worker_thread_fn, &st) != 0) {
-        fprintf(stderr, "[WORKER %d] Failed to create thread pool\n", worker_id);
-        ipc_detach(&ipc);
-        _exit(1);
+    // Threads começam a trabalhar
+    for(int i=0; i<config->threads_per_worker; i++) {
+        // Usamos uma função wrapper para passar os args corretos
+        pthread_create(&pool->threads[i], NULL, worker_thread_logic, &args);
     }
 
-    printf("[WORKER %d] Thread pool created with %d threads\n", worker_id, nthreads);
-    printf("[WORKER %d] Threads will accept connections from shared socket\n", worker_id);
-
-    /* Wait for termination signal */
-    while (!g_stop) {
-        pause();
+    // Processo worker fica vivo até receber sinal
+    while(running) {
+        sleep(1);
     }
 
-    printf("[WORKER %d] Shutdown signal received, cleaning up...\n", worker_id);
-
-    /* Close listening socket to wake up threads blocked on accept() */
-    shutdown(listen_fd, SHUT_RDWR);
-
-    /* Give threads a moment to notice */
-    struct timespec ts = {0, 100000000}; // 100ms
-    nanosleep(&ts, NULL);
-
-    /* Shutdown thread pool (join all threads) */
-    printf("[WORKER %d] Waiting for threads to exit...\n", worker_id);
-    thread_pool_shutdown(&pool);
-    printf("[WORKER %d] All threads exited\n", worker_id);
-
-    /* Detach from IPC */
-    ipc_detach(&ipc);
-
-    printf("[WORKER %d] Exiting cleanly\n", worker_id);
-    _exit(0);
+    // Cleanup
+    destroy_thread_pool(pool);
+    munmap(shm, sizeof(shared_data_t));
 }
