@@ -1,21 +1,16 @@
-
 #ifndef HTTP_H
 #define HTTP_H
 
-#include "master.h"  /* For ipc_handles_t */
+#include <stddef.h>
+#include "shared_mem.h"
+#include "semaphores.h"
 
-/* HTTP handler API used by worker threads.
- * client_fd: connected socket descriptor
- * document_root: path to document root from config
- * ipc: IPC handles for statistics updates
- *
- * The implementation is responsible for:
- * - Reading and parsing HTTP request
- * - Serving files or generating error responses
- * - Updating statistics (status codes, bytes transferred)
- * - Closing client_fd
- */
-void http_handle_request(int client_fd, const char *document_root, ipc_handles_t *ipc);
+typedef struct {
+    char method[16];
+    char path[512];
+    char version[16];
+} http_request_t;
 
-#endif // HTTP_H
+void http_handle_client(int client_fd, const char* doc_root, shared_data_t* shm, semaphores_t* sems);
 
+#endif

@@ -8,7 +8,8 @@
 
 #define SHM_NAME "/webserver_shm"
 
-shared_data_t* create_shared_memory(void) {
+
+shared_data_t* create_shared_memory() {
     int shm_fd = shm_open(SHM_NAME, O_CREAT | O_RDWR, 0666);
     if (shm_fd == -1) return NULL;
 
@@ -17,14 +18,12 @@ shared_data_t* create_shared_memory(void) {
         return NULL;
     }
 
-    shared_data_t* data = mmap(NULL, sizeof(shared_data_t),PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
-    
+    shared_data_t* data = mmap(NULL, sizeof(shared_data_t),
+                               PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
     close(shm_fd);
 
     if (data == MAP_FAILED) return NULL;
 
-    memset(data, 0, sizeof(shared_data_t));
-    
     return data;
 }
 

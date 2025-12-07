@@ -1,92 +1,122 @@
 #define _POSIX_C_SOURCE 200809L
 #include "http.h"
-#include <unistd.h>
-#include <string.h>
+#include "logger.h"
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <sys/stat.h>
+#include <sys/socket.h>
 #include <errno.h>
-#include <fcntl.h>
 
-void http_handle_request(int client_fd, const char *document_root, ipc_handles_t *ipc) {
-    (void)document_root;  /* Will be used later for file serving */
 
-    /* Verify file descriptor is valid */
-    if (client_fd < 0) {
-        stats_update(ipc, 500, 0);
+const char* get_mime_type(const char* path) {
+    char *dot = strrchr(path, '.');
+    if (!dot) return "text/plain";
+    if (strcmp(dot, ".html") == 0) return "text/html";
+    if (strcmp(dot, ".css") == 0) return "text/css";
+    if (strcmp(dot, ".js") == 0) return "application/javascript";
+    if (strcmp(dot, ".png") == 0) return "image/png";
+    if (strcmp(dot, ".jpg") == 0) return "image/jpeg";
+    return "application/octet-stream";
+}
+
+ssize_t send_all(int sock, const char* buf, size_t len) {
+    size_t total = 0;
+    while (total < len) {
+        ssize_t n = send(sock, buf + total, len - total, 0);
+        if (n <= 0) return -1;
+        total += n;
+    }
+    return total;
+}
+
+int parse_http_request(const char* buffer, http_request_t* req) {
+    char *line_end = strstr(buffer, "\r\n");
+    if (!line_end) return -1;
+    
+    char first_line[1024];
+    size_t len = line_end - buffer;
+    if (len >= sizeof(first_line)) len = sizeof(first_line) - 1;
+    strncpy(first_line, buffer, len);
+    first_line[len] = '\0';
+    
+    if (sscanf(first_line, "%s %s %s", req->method, req->path, req->version) != 3) {
+        return -1;
+    }
+    return 0;
+}
+
+void serve_file(int client_fd, const char* full_path, shared_data_t* shm, semaphores_t* sems, http_request_t* req) {
+    FILE* file = fopen(full_path, "rb");
+    if (!file) {
+        const char* msg = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n";
+        send(client_fd, msg, strlen(msg), 0);
+        
+        sem_wait(sems->stats_mutex);
+        shm->stats.status_404++;
+        shm->stats.total_requests++;
+        sem_post(sems->stats_mutex);
+        
+        log_request(sems->log_mutex, "127.0.0.1", req->method, req->path, 404, 0);
         return;
     }
 
-    /* Read request (must read before writing response) */
-    char request_buf[4096];
-    ssize_t bytes_read = read(client_fd, request_buf, sizeof(request_buf) - 1);
+    fseek(file, 0, SEEK_END);
+    long fsize = ftell(file);
+    fseek(file, 0, SEEK_SET);
 
-    if (bytes_read < 0) {
-        if (errno != EINTR && errno != ECONNRESET) {
-            perror("[HTTP] read failed");
-        }
-        close(client_fd);
-        stats_update(ipc, 500, 0);  /* Internal server error */
-        return;
-    }
-
-    if (bytes_read == 0) {
-        /* Client closed connection before sending data */
-        close(client_fd);
-        return;
-    }
-
-    request_buf[bytes_read] = '\0';
-
-    /* Just print first line */
-    char *newline = strchr(request_buf, '\r');
-    if (newline) *newline = '\0';
-    printf("[HTTP] Request: %s\n", request_buf);
-
-    /* Prepare response */
-    const char *body = "<!DOCTYPE html>\n"
-                       "<html>\n"
-                       "<head><title>ConcurrentHTTP Server</title></head>\n"
-                       "<body>\n"
-                       "<h1>Welcome to ConcurrentHTTP Server!</h1>\n"
-                       "<p>Your multi-threaded web server is working!</p>\n"
-                       "<p>Worker process ID: %d</p>\n"
-                       "</body>\n"
-                       "</html>\n";
-
-    char full_body[1024];
-    snprintf(full_body, sizeof(full_body), body, getpid());
-
-    char response[2048];
-    int response_len = snprintf(response, sizeof(response),
+    char header[1024];
+    const char* mime = get_mime_type(full_path);
+    int hlen = snprintf(header, sizeof(header),
         "HTTP/1.1 200 OK\r\n"
-        "Content-Type: text/html\r\n"
-        "Content-Length: %zu\r\n"
-        "Server: ConcurrentHTTP/1.0\r\n"
-        "Connection: close\r\n"
-        "\r\n"
-        "%s",
-        strlen(full_body), full_body);
+        "Content-Type: %s\r\n"
+        "Content-Length: %ld\r\n"
+        "Server: ConcurrentHTTP/1.0\r\n\r\n", mime, fsize);
 
-    /* Send response */
-    ssize_t total_sent = 0;
-    while (total_sent < response_len) {
-        ssize_t sent = write(client_fd, response + total_sent, response_len - total_sent);
-        if (sent < 0) {
-            if (errno == EINTR) continue;
-            if (errno != EPIPE && errno != ECONNRESET) {
-                perror("[HTTP] write failed");
-            }
-            stats_update(ipc, 500, total_sent);
-            close(client_fd);
-            return;
-        }
-        total_sent += sent;
+    send_all(client_fd, header, hlen);
+
+    char fbuf[4096];
+    size_t bytes_read;
+    long total_bytes = hlen;
+    
+    while ((bytes_read = fread(fbuf, 1, sizeof(fbuf), file)) > 0) {
+        send_all(client_fd, fbuf, bytes_read);
+        total_bytes += bytes_read;
+    }
+    fclose(file);
+
+    sem_wait(sems->stats_mutex);
+    shm->stats.status_200++;
+    shm->stats.bytes_transferred += total_bytes;
+    shm->stats.total_requests++;
+    sem_post(sems->stats_mutex);
+
+    log_request(sems->log_mutex, "127.0.0.1", req->method, req->path, 200, total_bytes);
+}
+
+void http_handle_client(int client_fd, const char* doc_root, shared_data_t* shm, semaphores_t* sems) {
+    char buffer[4096];
+    ssize_t n = recv(client_fd, buffer, sizeof(buffer) - 1, 0);
+    if (n <= 0) {
+        close(client_fd);
+        return;
+    }
+    buffer[n] = '\0';
+
+    http_request_t req;
+    if (parse_http_request(buffer, &req) != 0) {
+        close(client_fd);
+        return;
     }
 
-    printf("[HTTP] Sent %zd bytes total\n", total_sent);
+    char full_path[1024];
+    if (strcmp(req.path, "/") == 0) {
+        snprintf(full_path, sizeof(full_path), "%s/index.html", doc_root);
+    } else {
+        snprintf(full_path, sizeof(full_path), "%s%s", doc_root, req.path);
+    }
 
-    /* Update statistics: successful request (200 OK) */
-    stats_update(ipc, 200, total_sent);
-
-    /* Close connection */
+    serve_file(client_fd, full_path, shm, sems, &req);
     close(client_fd);
 }
