@@ -28,6 +28,9 @@ typedef struct {
     int rear;                          /* Index to enqueue to */
     int count;                         /* Current number of items in queue */
     int max_size;                      /* Maximum queue capacity */
+    int peak_depth;                    /* Peak queue depth reached */
+    long total_enqueued;               /* Total connections enqueued */
+    long total_dequeued;               /* Total connections dequeued */
 } connection_queue_t;
 
 /* Shared statistics structure */

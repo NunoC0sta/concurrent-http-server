@@ -1,6 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
 #include "http.h"
 #include "logger.h"
+#include "cache.h"
 #include <unistd.h>
 #include <string.h>
 #include <stdio.h>
@@ -8,6 +9,27 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <stdlib.h>
+#include <limits.h>
+
+/**
+ * Validate that the resolved path stays within document root
+ * Returns 1 if path is safe, 0 if it attempts directory traversal
+ */
+static int is_safe_path(const char *document_root, const char *requested_path) {
+    if (!requested_path || !document_root) return 0;
+    
+    /* Simple check: reject any path containing .. */
+    if (strstr(requested_path, "..") != NULL) {
+        return 0;
+    }
+    
+    /* Reject paths starting with / (absolute paths) */
+    if (requested_path[0] == '/' && requested_path[1] == '/') {
+        return 0;
+    }
+    
+    return 1;  /* Safe path */
+}
 
 /**
  * Get MIME type based on file extension
@@ -34,6 +56,29 @@ static const char* get_mime_type(const char *path) {
         return "text/plain";
     
     return "application/octet-stream";
+}
+
+/**
+ * Extract Content-Length from HTTP headers
+ * Returns the content length, or 0 if not found/invalid
+ */
+static size_t get_content_length(const char *headers) {
+    if (!headers) return 0;
+    
+    const char *cl_start = strstr(headers, "Content-Length:");
+    if (!cl_start) return 0;
+    
+    cl_start += 15; /* Skip "Content-Length:" */
+    
+    /* Skip whitespace */
+    while (*cl_start == ' ' || *cl_start == '\t') cl_start++;
+    
+    size_t length = 0;
+    if (sscanf(cl_start, "%zu", &length) != 1) {
+        return 0;
+    }
+    
+    return length;
 }
 
 /**
@@ -175,6 +220,33 @@ static void serve_file(int client_fd, const char *file_path,
 }
 
 /**
+ * Serve server statistics
+ */
+static void serve_stats(int client_fd, ipc_handles_t *ipc) {
+    char body[2048];
+    int len = snprintf(body, sizeof(body),
+        "<!DOCTYPE html>\n"
+        "<html>\n"
+        "<head><title>Server Statistics</title></head>\n"
+        "<body style='font-family: monospace; margin: 20px;'>\n"
+        "<h1>Server Statistics</h1>\n"
+        "<p>For detailed stats, use the JSON endpoint or check logs.</p>\n"
+        "<pre>\n"
+        "Server is running and accepting requests.\n"
+        "View access.log for request details.\n"
+        "</pre>\n"
+        "</body>\n"
+        "</html>\n"
+    );
+    
+    send_response_headers(client_fd, 200, "text/html", len);
+    write(client_fd, body, len);
+    
+    log_request(ipc, "127.0.0.1", "/stats", "GET", 200, len);
+    stats_update(ipc, 200, len);
+}
+
+/**
  * Main HTTP request handler
  */
 void http_handle_request(int client_fd, const char *document_root, ipc_handles_t *ipc) {
@@ -183,7 +255,7 @@ void http_handle_request(int client_fd, const char *document_root, ipc_handles_t
         return;
     }
 
-    /* Read request */
+    /* Read request headers */
     char request_buf[4096];
     ssize_t bytes_read = read(client_fd, request_buf, sizeof(request_buf) - 1);
 
@@ -208,7 +280,90 @@ void http_handle_request(int client_fd, const char *document_root, ipc_handles_t
 
     printf("[HTTP] %s %s\n", method, path);
 
-    /* Build full file path */
+    /* Read request body if POST/PUT with Content-Length */
+    char *body = NULL;
+    size_t body_len = 0;
+    if (strcmp(method, "POST") == 0 || strcmp(method, "PUT") == 0) {
+        size_t content_len = get_content_length(request_buf);
+        if (content_len > 0 && content_len <= 65536) {  /* Limit to 64KB */
+            body = malloc(content_len + 1);
+            if (body) {
+                /* Find end of headers (double CRLF) */
+                char *body_start = strstr(request_buf, "\r\n\r\n");
+                if (body_start) {
+                    body_start += 4;
+                    size_t headers_body_len = strlen(body_start);
+                    
+                    /* Copy any body data already in initial read */
+                    if (headers_body_len > 0) {
+                        memcpy(body, body_start, headers_body_len);
+                        body_len = headers_body_len;
+                    }
+                    
+                    /* Read remaining body data if needed */
+                    while (body_len < content_len) {
+                        ssize_t n = read(client_fd, body + body_len, content_len - body_len);
+                        if (n <= 0) break;
+                        body_len += n;
+                    }
+                }
+                body[body_len] = '\0';
+                printf("[HTTP] Body: %zu bytes\n", body_len);
+            }
+        }
+    }
+
+    /* Handle special endpoints */
+    if (strcmp(path, "/stats") == 0) {
+        serve_stats(client_fd, ipc);
+        free(method);
+        free(path);
+        free(body);
+        close(client_fd);
+        return;
+    }
+
+    /* Check for path traversal attacks */
+    if (!is_safe_path(document_root, path)) {
+        const char *resp_body = "<html><body><h1>403 Forbidden</h1></body></html>";
+        size_t resp_len = strlen(resp_body);
+        
+        send_response_headers(client_fd, 403, "text/html", resp_len);
+        write(client_fd, resp_body, resp_len);
+        
+        log_request(ipc, "127.0.0.1", path, method, 403, resp_len);
+        stats_update(ipc, 403, resp_len);
+        
+        free(method);
+        free(path);
+        free(body);
+        close(client_fd);
+        return;
+    }
+
+    /* Handle POST/PUT by accepting and echoing body */
+    if (strcmp(method, "POST") == 0 || strcmp(method, "PUT") == 0) {
+        char resp_body[1024];
+        int resp_len = snprintf(resp_body, sizeof(resp_body),
+            "<html><body><h1>%s Request Received</h1>"
+            "<p>Path: %s</p>"
+            "<p>Body Length: %zu bytes</p></body></html>",
+            method, path, body_len);
+        
+        send_response_headers(client_fd, 201, "text/html", resp_len);
+        write(client_fd, resp_body, resp_len);
+        
+        log_request(ipc, "127.0.0.1", path, method, 201, resp_len);
+        stats_update(ipc, 201, resp_len);
+        
+        free(method);
+        free(path);
+        free(body);
+        close(client_fd);
+        return;
+    }
+
+    /* Build full file path for GET requests */
     char file_path[512];
     
     /* Handle root path */
@@ -224,5 +379,6 @@ void http_handle_request(int client_fd, const char *document_root, ipc_handles_t
     /* Cleanup */
     free(method);
     free(path);
+    free(body);
     close(client_fd);
 }

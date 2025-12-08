@@ -19,6 +19,10 @@ typedef struct {
     int front;
     int rear;
     int count;
+    int peak_depth;           /* Peak queue depth reached */
+    long total_enqueued;      /* Total connections enqueued */
+    long total_dequeued;      /* Total connections dequeued */
+    unsigned long total_wait_time;  /* Cumulative wait time in ms */
 } connection_queue_t;
 
 typedef struct {

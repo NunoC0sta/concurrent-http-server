@@ -317,6 +317,12 @@ int queue_enqueue(ipc_handles_t *handles, int client_fd) {
     q->connections[q->rear] = client_fd;
     q->rear = (q->rear + 1) % q->max_size;
     q->count++;
+    
+    /* Update metrics */
+    q->total_enqueued++;
+    if (q->count > q->peak_depth) {
+        q->peak_depth = q->count;
+    }
 
     /* Release mutex */
     sem_post(handles->sem_mutex);
@@ -352,6 +358,9 @@ int queue_dequeue(ipc_handles_t *handles) {
     int client_fd = q->connections[q->front];
     q->front = (q->front + 1) % q->max_size;
     q->count--;
+    
+    /* Update metrics */
+    q->total_dequeued++;
 
     /* Release mutex */
     sem_post(handles->sem_mutex);

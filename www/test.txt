@@ -1,0 +1,11 @@
+This is a plain text test file.
+
+It demonstrates that the server can serve
+different file types with appropriate MIME types.
+
+Server Statistics:
+- Port: 8080
+- Document Root: ./www
+- Configuration File: server.conf
+
+Test this file by accessing: http://localhost:8080/test.txt
