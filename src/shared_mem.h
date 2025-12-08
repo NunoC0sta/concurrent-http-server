@@ -26,7 +26,7 @@ typedef struct {
     server_stats_t stats;
 } shared_data_t;
 
-shared_data_t* create_shared_memory();
+shared_data_t* create_shared_memory(void);
 void destroy_shared_memory(shared_data_t* data);
 
 #endif

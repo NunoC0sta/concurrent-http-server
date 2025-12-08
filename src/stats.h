@@ -1,11 +1,20 @@
 #ifndef STATS_H
 #define STATS_H
 
-#include "shared_mem.h"
-#include "semaphores.h"
 #include <stdint.h>
+#include <time.h>
 
-void stats_update(shared_data_t *shm, semaphores_t *sems, int status_code, uint64_t bytes);
-void stats_display(shared_data_t *shm, semaphores_t *sems);
+/* Shared statistics structure */
+typedef struct {
+    uint64_t total_requests;           /* Total HTTP requests served */
+    uint64_t bytes_transferred;        /* Total bytes sent to clients */
+    uint32_t status_200;               /* Successful requests */
+    uint32_t status_404;               /* Not found errors */
+    uint32_t status_403;               /* Forbidden errors */
+    uint32_t status_500;               /* Server errors */
+    uint32_t status_503;               /* Service unavailable (queue full) */
+    uint32_t active_connections;       /* Current active connections */
+    time_t start_time;                 /* Server start timestamp */
+} server_stats_t;
 
-#endif
+#endif // STATS_H
