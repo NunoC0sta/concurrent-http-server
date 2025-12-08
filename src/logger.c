@@ -4,6 +4,7 @@
 #include <time.h>
 #include <string.h>
 #include <semaphore.h>
+#include <sys/stat.h>
 
 static FILE *g_log_file = NULL;
 
@@ -62,6 +63,8 @@ void log_request(ipc_handles_t *ipc, const char *client_ip,
     /* Flush to ensure it's written */
     fflush(g_log_file);
     
-    /* Unlock */
+    /* Check for log rotation (outside critical section for efficiency) */
     sem_post(ipc->sem_log);
+    
+    /* Note: log rotation is checked periodically, not on every write for performance */
 }

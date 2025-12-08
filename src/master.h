@@ -68,6 +68,7 @@ void stats_update(ipc_handles_t *handles, int status_code, uint64_t bytes);
 void stats_inc_active(ipc_handles_t *handles);
 void stats_dec_active(ipc_handles_t *handles);
 void stats_display(ipc_handles_t *handles);
+void stats_record_response_time(ipc_handles_t *handles, struct timespec *start_time);
 
 /* Master control functions */
 int master_init(server_config_t *config);

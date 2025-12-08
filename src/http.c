@@ -10,6 +10,7 @@
 #include <sys/stat.h>
 #include <stdlib.h>
 #include <limits.h>
+#include <time.h>
 
 /**
  * Validate that the resolved path stays within document root
@@ -130,14 +131,21 @@ static void send_response_headers(int client_fd, int status_code,
         case 503: status_text = "Service Unavailable"; break;
     }
     
+    /* Get current time for Date header (RFC 1123 format) */
+    time_t now = time(NULL);
+    struct tm *tm_info = gmtime(&now);
+    char date_buf[64];
+    strftime(date_buf, sizeof(date_buf), "%a, %d %b %Y %H:%M:%S GMT", tm_info);
+    
     int len = snprintf(header, sizeof(header),
         "HTTP/1.1 %d %s\r\n"
         "Content-Type: %s\r\n"
         "Content-Length: %zu\r\n"
+        "Date: %s\r\n"
         "Server: ConcurrentHTTP/1.0\r\n"
         "Connection: close\r\n"
         "\r\n",
-        status_code, status_text, content_type, content_length);
+        status_code, status_text, content_type, content_length, date_buf);
     
     write(client_fd, header, len);
 }
@@ -279,6 +287,10 @@ void http_handle_request(int client_fd, const char *document_root, ipc_handles_t
     }
 
     printf("[HTTP] %s %s\n", method, path);
+    
+    /* Record start time for response time tracking */
+    struct timespec start_time;
+    clock_gettime(CLOCK_MONOTONIC, &start_time);
 
     /* Read request body if POST/PUT with Content-Length */
     char *body = NULL;
@@ -320,6 +332,7 @@ void http_handle_request(int client_fd, const char *document_root, ipc_handles_t
         free(path);
         free(body);
         close(client_fd);
+        stats_record_response_time(ipc, &start_time);
         return;
     }
 
@@ -338,6 +351,50 @@ void http_handle_request(int client_fd, const char *document_root, ipc_handles_t
         free(path);
         free(body);
         close(client_fd);
+        stats_record_response_time(ipc, &start_time);
+        return;
+    }
+
+    /* Handle HEAD method (same as GET but without body) */
+    if (strcmp(method, "HEAD") == 0) {
+        /* Build full file path */
+        char file_path[512];
+        if (strcmp(path, "/") == 0) {
+            snprintf(file_path, sizeof(file_path), "%s/index.html", document_root);
+        } else {
+            snprintf(file_path, sizeof(file_path), "%s%s", document_root, path);
+        }
+        
+        struct stat st;
+        if (stat(file_path, &st) < 0) {
+            send_response_headers(client_fd, 404, "text/html", 0);
+            log_request(ipc, "127.0.0.1", path, "HEAD", 404, 0);
+            stats_update(ipc, 404, 0);
+        } else if (S_ISDIR(st.st_mode)) {
+            char index_path[1024];
+            snprintf(index_path, sizeof(index_path), "%s/index.html", file_path);
+            if (stat(index_path, &st) == 0 && S_ISREG(st.st_mode)) {
+                const char *mime_type = get_mime_type(index_path);
+                send_response_headers(client_fd, 200, mime_type, st.st_size);
+                log_request(ipc, "127.0.0.1", path, "HEAD", 200, 0);
+                stats_update(ipc, 200, 0);
+            } else {
+                send_response_headers(client_fd, 403, "text/html", 0);
+                log_request(ipc, "127.0.0.1", path, "HEAD", 403, 0);
+                stats_update(ipc, 403, 0);
+            }
+        } else {
+            const char *mime_type = get_mime_type(file_path);
+            send_response_headers(client_fd, 200, mime_type, st.st_size);
+            log_request(ipc, "127.0.0.1", path, "HEAD", 200, 0);
+            stats_update(ipc, 200, 0);
+        }
+        
+        free(method);
+        free(path);
+        free(body);
+        close(client_fd);
+        stats_record_response_time(ipc, &start_time);
         return;
     }
 
@@ -360,6 +417,7 @@ void http_handle_request(int client_fd, const char *document_root, ipc_handles_t
         free(path);
         free(body);
         close(client_fd);
+        stats_record_response_time(ipc, &start_time);
         return;
     }
 
@@ -376,6 +434,9 @@ void http_handle_request(int client_fd, const char *document_root, ipc_handles_t
     /* Serve the file */
     serve_file(client_fd, file_path, path, ipc);
 
+    /* Record response time */
+    stats_record_response_time(ipc, &start_time);
+    
     /* Cleanup */
     free(method);
     free(path);

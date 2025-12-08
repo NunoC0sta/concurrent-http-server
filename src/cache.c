@@ -18,6 +18,7 @@ struct cache {
     int max_entries;
     size_t max_size;
     size_t current_size;
+    pthread_rwlock_t rwlock;  /* Reader-writer lock for concurrent access */
 };
 
 /* Initialize cache with maximum size in MB */
@@ -36,19 +37,36 @@ cache_t* cache_init(size_t max_size_mb) {
         return NULL;
     }
     
+    /* Initialize reader-writer lock */
+    if (pthread_rwlock_init(&cache->rwlock, NULL) != 0) {
+        free(cache->entries);
+        free(cache);
+        return NULL;
+    }
+    
     return cache;
 }
 
-/* Get entry from cache (returns NULL if not found) */
+/* Get entry from cache (returns NULL if not found) - uses read lock */
 cache_entry_t* cache_get(cache_t *cache, const char *key) {
     if (!cache || !key) return NULL;
     
+    pthread_rwlock_rdlock(&cache->rwlock);
+    
     for (int i = 0; i < cache->num_entries; i++) {
         if (cache->entries[i].key && strcmp(cache->entries[i].key, key) == 0) {
+            /* Note: can't update accessed time with read lock, need write lock for that */
+            pthread_rwlock_unlock(&cache->rwlock);
+            
+            /* Acquire write lock to update timestamp */
+            pthread_rwlock_wrlock(&cache->rwlock);
             cache->entries[i].accessed = time(NULL);
+            pthread_rwlock_unlock(&cache->rwlock);
+            
             return &cache->entries[i];
         }
     }
+    pthread_rwlock_unlock(&cache->rwlock);
     return NULL;
 }
 
@@ -66,9 +84,11 @@ static int find_lru_entry(cache_t *cache) {
     return lru_idx;
 }
 
-/* Add or update entry in cache */
+/* Add or update entry in cache - uses write lock */
 void cache_put(cache_t *cache, const char *key, void *data, size_t size) {
     if (!cache || !key || !data) return;
+    
+    pthread_rwlock_wrlock(&cache->rwlock);
     
     /* Check if entry already exists */
     for (int i = 0; i < cache->num_entries; i++) {
@@ -78,12 +98,16 @@ void cache_put(cache_t *cache, const char *key, void *data, size_t size) {
             free(cache->entries[i].data);
             
             cache->entries[i].data = malloc(size);
-            if (!cache->entries[i].data) return;
+            if (!cache->entries[i].data) {
+                pthread_rwlock_unlock(&cache->rwlock);
+                return;
+            }
             
             memcpy(cache->entries[i].data, data, size);
             cache->entries[i].size = size;
             cache->entries[i].accessed = time(NULL);
             cache->current_size += size;
+            pthread_rwlock_unlock(&cache->rwlock);
             return;
         }
     }
@@ -108,12 +132,16 @@ void cache_put(cache_t *cache, const char *key, void *data, size_t size) {
         /* Add new entry if we have space */
         if (cache->current_size + size <= cache->max_size) {
             cache->entries[cache->num_entries].key = malloc(strlen(key) + 1);
-            if (!cache->entries[cache->num_entries].key) return;
+            if (!cache->entries[cache->num_entries].key) {
+                pthread_rwlock_unlock(&cache->rwlock);
+                return;
+            }
             
             strcpy(cache->entries[cache->num_entries].key, key);
             cache->entries[cache->num_entries].data = malloc(size);
             if (!cache->entries[cache->num_entries].data) {
                 free(cache->entries[cache->num_entries].key);
+                pthread_rwlock_unlock(&cache->rwlock);
                 return;
             }
             
@@ -125,6 +153,8 @@ void cache_put(cache_t *cache, const char *key, void *data, size_t size) {
             cache->num_entries++;
         }
     }
+    
+    pthread_rwlock_unlock(&cache->rwlock);
 }
 
 /* Get data pointer from cache entry */
@@ -143,6 +173,8 @@ size_t cache_entry_get_size(cache_entry_t *entry) {
 void cache_destroy(cache_t *cache) {
     if (!cache) return;
     
+    pthread_rwlock_wrlock(&cache->rwlock);
+    
     for (int i = 0; i < cache->num_entries; i++) {
         if (cache->entries[i].key) {
             free(cache->entries[i].key);
@@ -151,6 +183,9 @@ void cache_destroy(cache_t *cache) {
             free(cache->entries[i].data);
         }
     }
+    
+    pthread_rwlock_unlock(&cache->rwlock);
+    pthread_rwlock_destroy(&cache->rwlock);
     
     free(cache->entries);
     free(cache);

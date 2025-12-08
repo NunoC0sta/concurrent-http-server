@@ -2,6 +2,7 @@
 #define CACHE_H
 
 #include <stddef.h>
+#include <pthread.h>
 
 /* Opaque cache types */
 typedef struct cache cache_t;

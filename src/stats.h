@@ -15,6 +15,7 @@ typedef struct {
     uint32_t status_503;               /* Service unavailable (queue full) */
     uint32_t active_connections;       /* Current active connections */
     time_t start_time;                 /* Server start timestamp */
+    uint64_t total_response_time_ms;   /* Total response time in milliseconds */
 } server_stats_t;
 
 #endif // STATS_H

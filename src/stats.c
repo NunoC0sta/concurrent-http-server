@@ -2,6 +2,7 @@
 #include "master.h"  /* For ipc_handles_t and function declarations */
 #include <stdio.h>
 #include <semaphore.h>
+#include <time.h>
 
 /**
  * Update statistics atomically
@@ -24,6 +25,24 @@ void stats_update(ipc_handles_t *handles, int status_code, uint64_t bytes) {
         case 503: stats->status_503++; break;
     }
 
+    sem_post(handles->sem_stats);
+}
+
+/**
+ * Record response time for a request
+ */
+void stats_record_response_time(ipc_handles_t *handles, struct timespec *start_time) {
+    if (!handles || !handles->shared_data || !start_time) return;
+
+    struct timespec end_time;
+    clock_gettime(CLOCK_MONOTONIC, &end_time);
+    
+    /* Calculate elapsed time in milliseconds */
+    uint64_t elapsed_ms = (end_time.tv_sec - start_time->tv_sec) * 1000 +
+                          (end_time.tv_nsec - start_time->tv_nsec) / 1000000;
+    
+    sem_wait(handles->sem_stats);
+    handles->shared_data->stats.total_response_time_ms += elapsed_ms;
     sem_post(handles->sem_stats);
 }
 
@@ -60,6 +79,12 @@ void stats_display(ipc_handles_t *handles) {
 
     server_stats_t *stats = &handles->shared_data->stats;
     time_t uptime = time(NULL) - stats->start_time;
+    
+    /* Calculate average response time */
+    uint64_t avg_response_time_ms = 0;
+    if (stats->total_requests > 0) {
+        avg_response_time_ms = stats->total_response_time_ms / stats->total_requests;
+    }
 
     printf("\n========================================\n");
     printf("SERVER STATISTICS\n");
@@ -73,6 +98,7 @@ void stats_display(ipc_handles_t *handles) {
     printf("Service Unavailable (503): %u\n", stats->status_503);
     printf("Bytes Transferred: %lu\n", stats->bytes_transferred);
     printf("Active Connections: %u\n", stats->active_connections);
+    printf("Average Response Time: %lu ms\n", avg_response_time_ms);
     printf("========================================\n\n");
 
     sem_post(handles->sem_stats);
