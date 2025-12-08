@@ -11,6 +11,7 @@
 #include <signal.h>
 #include <sys/wait.h>
 #include <time.h>
+#include <string.h>
 
 static int g_sockfd = -1;
 static volatile int keep_running = 1;

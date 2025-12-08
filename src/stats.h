@@ -3,6 +3,7 @@
 
 #include "shared_mem.h"
 #include "semaphores.h"
+#include <stdint.h>
 
 void stats_update(shared_data_t *shm, semaphores_t *sems, int status_code, uint64_t bytes);
 void stats_display(shared_data_t *shm, semaphores_t *sems);
