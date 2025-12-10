@@ -1,0 +1,1 @@
+este ficheiro é so para dar commit da pasta pq se a pasta tiver vazia, n da commit

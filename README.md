@@ -1,193 +1,140 @@
-# Concurrent HTTP Server
+# Servidor Web Multi-Threaded com IPC e Semáforos
+**Sistemas Operativos - TP2**
 
-A production-grade multi-process, multi-threaded HTTP/1.1 web server demonstrating advanced OS concepts: POSIX IPC, semaphores, pthreads, and concurrent request handling.
+Um servidor web HTTP/1.1 concorrente de nível de produção, implementando sincronização avançada de processos e threads utilizando semáforos POSIX, memória partilhada e thread pools.
 
-## Quick Start
+## Índice
+Visão Geral
+Início Rápido
+Funcionalidades
+Estrutura do Projeto
+Configuração
+Testes
+Detalhes de Implementação
+Autores
 
-### Prerequisites
-- Linux system (Ubuntu 20.04+)
-- gcc, make, POSIX libraries
+## Visão Geral
+Este projeto implementa um servidor web HTTP/1.1 multiprocesso e multi-thread que demonstra:
+* **Gestão de Processos:** Arquitetura Mestre-Trabalhador (Master-Worker) usando `fork()`.
+* **Comunicação Inter-Processos (IPC):** Memória partilhada e semáforos POSIX.
+* **Sincronização de Threads:** Mutexes Pthread, variáveis de condição e trincos de leitura-escrita (reader-writer locks).
+* **Tratamento de Pedidos Concorrentes:** Thread pools com padrão produtor-consumidor.
+* **Protocolo HTTP:** Suporte HTTP/1.1 incluindo métodos GET e HEAD.
+* **Gestão de Recursos:** Cache de ficheiros LRU thread-safe e rastreio de estatísticas.
 
-### Build
-```bash
-make clean
-make
-```
+## Início Rápido
 
-### Run
-```bash
+### 1. Compilação
+Compila o servidor usando o Make:
+make clean && make
+
+### 2. Executar o Servidor
+Inicia o servidor na porta padrão (8080):
 ./server
-```
 
-The server will:
-- Load configuration from `server.conf`
-- Create 4 worker processes
-- Each worker spawns 10 threads in a thread pool
-- Listen on port 8080 (configurable)
-- Serve files from `./www` directory
+### 3. Aceder
+Browser: http://localhost:8080
+Curl: curl -v http://localhost:8080/index.html
 
-### Test
-```bash
-# GET request
-curl http://localhost:8080/index.html
 
-# HEAD request (returns headers only)
-curl -I http://localhost:8080/about.html
+### 4. Funcionalidades
+Funcionalidades Principais (Core)
 
-# View server stats
-curl http://localhost:8080/stats
+    [x] Arquitetura Multi-Processo: 1 mestre + N trabalhadores.
 
-# Test POST request
-curl -X POST -d "test data" http://localhost:8080/upload
+    [x] Thread Pools: Padrão Produtor-Consumidor.
 
-# View access log
-tail -f access.log
-```
+    [x] Suporte HTTP/1.1: Métodos GET e HEAD.
 
-### Shutdown
-Press `Ctrl+C` in the server terminal for graceful shutdown.
+    [x] Códigos de Estado: 200, 404, 403, 500, 503.
 
-## Configuration
+    [x] Tipos MIME: HTML, CSS, JavaScript, imagens (PNG, JPG), PDF.
 
-Edit `server.conf` to customize:
-- `PORT` - Listening port (default: 8080)
-- `DOCUMENT_ROOT` - File serving directory (default: ./www)
-- `NUM_WORKERS` - Number of worker processes (default: 4)
-- `THREADS_PER_WORKER` - Threads per worker (default: 10)
-- `MAX_QUEUE_SIZE` - Connection queue size (default: 100)
-- `CACHE_SIZE_MB` - Per-worker cache size (default: 10)
-- `LOG_FILE` - Access log file (default: access.log)
+    [x] Páginas de Erro Personalizadas: Páginas 404 e 500 customizadas.
 
-## Architecture
+Funcionalidades de Sincronização
 
-### Master Process
-- Accepts incoming connections
-- Manages 4 worker processes
-- Initializes IPC (shared memory + 5 semaphores)
-- Displays statistics every 30 seconds
-- Handles graceful shutdown (SIGINT/SIGTERM)
+    [x] Semáforos POSIX: Sincronização entre processos.
 
-### Worker Processes
-- Manages a thread pool (10 threads per worker)
-- Threads directly accept from shared listening socket
-- Share statistics via IPC
+    [x] Mutexes Pthread: Exclusão mútua ao nível da thread.
 
-### Thread Pool
-- 10 concurrent request handlers per worker
-- Each thread blocks accepting connections from shared socket
-- Includes signal handlers for clean termination
+    [x] Variáveis de Condição: Sinalização da fila de conexões.
 
-### IPC System
-- **Shared Memory**: Connection queue, server statistics
-- **Semaphores**: 
-  - `sem_mutex` - Queue mutual exclusion
-  - `sem_empty` - Empty slots in queue
-  - `sem_full` - Filled slots in queue
-  - `sem_stats` - Statistics protection
-  - `sem_log` - Log file protection
+    [x] Trincos Leitura-Escrita (RW Locks): Acesso seguro à cache de ficheiros.
 
-## Features
+Funcionalidades Bónus
 
-### HTTP Protocol
-- ✅ GET requests - Serve static files
-- ✅ HEAD requests - Return headers only
-- ✅ POST/PUT requests - Accept request bodies
-- ✅ Status codes: 200, 403, 404, 500, 503, 201
-- ✅ MIME type detection (HTML, CSS, JS, images, PDF, etc.)
-- ✅ Directory index (serve index.html automatically)
-- ✅ Custom error pages for 4xx/5xx errors
-- ✅ RFC 1123 Date header on all responses
-- ✅ Apache Combined Log Format access logging
+    [ ] HTTP Keep-Alive: Conexões persistentes.
 
-### Synchronization
-- ✅ POSIX named semaphores for inter-process sync
-- ✅ Pthread mutexes for thread-level protection
-- ✅ Reader-writer locks (pthread_rwlock) for cache access
-- ✅ Thread-safe file caching (LRU eviction)
-- ✅ Thread-safe statistics tracking
-- ✅ Thread-safe logging with atomic writes
+    [ ] Dashboard em Tempo Real: Visualizador de estatísticas via Web.
 
-### Caching
-- ✅ LRU cache per worker (max 100 entries, 10MB size)
-- ✅ Reader-writer locks allow multiple concurrent reads
-- ✅ Automatic eviction of least-recently-used entries
-- ✅ Timestamp tracking for access recency
+    [ ] Suporte CGI: Execução de scripts dinâmicos.
 
-### Logging & Statistics
-- ✅ Access log in Apache Combined Log Format
-- ✅ Per-status-code request tracking (200, 404, 500, etc.)
-- ✅ Total bytes transferred counter
-- ✅ Active connections counter
-- ✅ Average response time calculation
-- ✅ Log rotation at 10MB
-- ✅ Semaphore-protected atomic writes
+    [ ] Virtual Hosts: Múltiplos domínios num servidor.
 
-## Implementation Highlights
+    [ ] Suporte HTTPS: Encriptação SSL/TLS.
 
-### No Race Conditions
-- All shared resources protected by semaphores
-- Statistics updates are atomic (semaphore-guarded)
-- Log writes are serialized via semaphore
-- Cache uses reader-writer locks for optimal concurrency
 
-### Memory Safety
-- No memory leaks (verified with Valgrind during development)
-- All system calls checked for errors
-- Proper cleanup on graceful shutdown
-- Bounded buffers prevent overflow
+### 5. Estrutura do Projeto
+src/
+  main.c
+  master.c/h
+  worker.c/h
+  http.c/h
+  thread_pool.c/h
+  cache.c/h
+  logger.c/h
+  stats.c/h
+  config.c/h
+www/
+  index.html
+  errors/
+tests/
+Makefile
+server.conf
+README.md
 
-### Performance
-- Non-blocking thread pools for concurrent request handling
-- LRU cache reduces file I/O overhead
-- Reader-writer locks allow multiple cache readers simultaneously
-- Shared socket allows efficient load distribution across threads
+### 6. Testes
 
-## Build System
+Fazer quando tivermos os testes
 
-```bash
-make all      # Build server executable
-make clean    # Remove object files and binaries
-make run      # Build and start the server
-```
+### 7. Detalhes de Implementação
+Processo Mestre
 
-Compiler flags: `-Wall -Wextra -pthread -lrt -g`
+    Inicializa o socket de escuta.
 
-## Project Structure
+    Cria memória partilhada e semáforos.
 
-```
-concurrent-http-server/
-├── src/
-│   ├── main.c              # Server entry point
-│   ├── master.c/h          # Master process + IPC
-│   ├── worker.c/h          # Worker process + thread pool
-│   ├── http.c/h            # HTTP request handling
-│   ├── cache.c/h           # LRU caching (with rwlock)
-│   ├── logger.c/h          # Access logging + rotation
-│   ├── stats.c/h           # Statistics tracking
-│   ├── config.c/h          # Configuration file loading
-│   ├── thread_pool.c/h     # Thread pool management
-│   └── [semaphores, shared_mem].c/h
-├── www/
-│   ├── index.html          # Test homepage
-│   ├── about.html          # About page
-│   ├── style.css           # Styling
-│   └── test.txt            # Test file
-├── Makefile                # Build configuration
-├── server.conf             # Server configuration
-└── README.md              # This file
-```
+    Faz fork de N processos trabalhadores.
 
-## Testing
+    Aceita conexões e coloca-as na fila partilhada (Produtor).
 
-See `TESTING_GUIDE.md` for comprehensive testing procedures including:
-- Functional tests (GET, HEAD, POST, status codes)
-- Concurrency tests (Apache Bench load testing)
-- Synchronization tests (race condition detection)
-- Stress tests (long-running stability)
+Processos Trabalhadores
 
-## References
+    Mantém uma thread pool de tamanho fixo.
 
-- POSIX Threads: https://computing.llnl.gov/tutorials/pthreads/
-- HTTP/1.1 RFC 2616: https://www.rfc-editor.org/rfc/rfc2616
-- Beej's Guide to Network Programming
-- The Linux Programming Interface (Kerrisk)
+    Threads retiram conexões da fila partilhada (Consumidor).
+
+    Atualiza estatísticas partilhadas atomicamente.
+
+    Faz cache de ficheiros em memória usando um algoritmo LRU protegido por trincos Leitura-Escrita.
+
+
+### 8. Problemas Conhecidos
+ 
+Fazer depois também
+
+### Autores
+
+    Martim Travesso Dias
+
+        Nº Mec: 125925
+
+        Email: martimtdias@ua.pt
+
+    Nuno Carvalho Costa
+
+        Nº Mec: 125120
+
+        Email: nunoc27@ua.pt
+
