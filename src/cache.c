@@ -18,7 +18,7 @@ struct cache {
     int max_entries;
     size_t max_size;
     size_t current_size;
-    pthread_rwlock_t rwlock;  /* Reader-writer lock for concurrent access */
+    pthread_rwlock_t rwlock;
 };
 
 /* Initialize cache with maximum size in MB */
