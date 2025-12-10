@@ -25,3 +25,4 @@ src/shared_mem.o
 src/stats.o
 src/worker.o
 src/thread_pool.o
+tests/test_concurrent
