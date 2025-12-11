@@ -1,5 +1,5 @@
 #!/bin/bash
-# real_sustained_load.sh
+set -e
 
 URL="http://localhost:8080/"
 DURATION=300
@@ -23,10 +23,9 @@ while [ $(date +%s) -lt ${END_TIME} ]; do
     ELAPSED=$(($(date +%s) - ${START}))
     echo -ne "\rElapsed: ${ELAPSED}s / ${DURATION}s | Requests: ${TOTAL_REQUESTS}"
     
-    # Run a batch of requests
     OUTPUT=$(ab -n ${BATCH_SIZE} -c ${CONCURRENT} -q ${URL} 2>&1)
     
-    # Parse results
+    # Parse results from ab output
     COMPLETE=$(echo "$OUTPUT" | grep "Complete requests:" | awk '{print $3}')
     FAILED=$(echo "$OUTPUT" | grep "Failed requests:" | awk '{print $3}')
     

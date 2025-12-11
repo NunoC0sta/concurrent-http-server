@@ -22,6 +22,7 @@ typedef struct {
     test_stats_t* stats;
 } thread_args_t;
 
+// Required by libcurl, contents and userp are unused here
 static size_t write_callback(void* contents, size_t size, size_t nmemb, void* userp) {
     (void)contents; (void)userp;
     return size * nmemb;
@@ -73,7 +74,7 @@ void* worker_thread(void* arg) {
         }
         pthread_mutex_unlock(&args->stats->lock);
         
-        usleep(10000); // 10ms delay between requests
+        usleep(10000);
     }
     curl_easy_cleanup(curl);
     return NULL;
@@ -82,7 +83,7 @@ void* worker_thread(void* arg) {
 void run_concurrent_test(const char* test_name, int num_threads, 
                          int requests_per_thread, const char* test_path) {
     printf("\n[%s]\n", test_name);
-    printf("  Configuration: %d threads x %d requests = %d total\n", 
+    printf("  Configuration: %d threads × %d requests = %d total\n", 
            num_threads, requests_per_thread, num_threads * requests_per_thread);
     
     test_stats_t stats = {0};
@@ -93,7 +94,6 @@ void run_concurrent_test(const char* test_name, int num_threads,
     struct timeval start_time, end_time;
     gettimeofday(&start_time, NULL);
     
-    // Create threads
     for (int i = 0; i < num_threads; i++) {
         args_array[i].thread_id = i;
         args_array[i].num_requests = requests_per_thread;
@@ -102,7 +102,6 @@ void run_concurrent_test(const char* test_name, int num_threads,
         pthread_create(&threads[i], NULL, worker_thread, &args_array[i]);
     }
     
-    // Wait for all threads
     for (int i = 0; i < num_threads; i++) {
         pthread_join(threads[i], NULL);
     }
@@ -126,10 +125,10 @@ void run_concurrent_test(const char* test_name, int num_threads,
     printf("    Requests/sec:    %.2f\n", rps);
     
     if (stats.failed_requests == 0) {
-        printf("  - PASSED\n");
+        printf("  PASSED\n");
         tests_passed++;
     } else {
-        printf("  - FAILED (%d dropped connections)\n", stats.failed_requests);
+        printf("  FAILED (%d dropped connections)\n", stats.failed_requests);
         tests_failed++;
     }
     tests_run++;
@@ -152,7 +151,7 @@ void test_no_dropped_connections(void) {
 
 void test_multiple_clients(void) {
     printf("\n[TEST 7] Multiple clients with repeated requests\n");
-    run_concurrent_test("50 clients x 10 requests each", 50, 10, "/");
+    run_concurrent_test("50 clients × 10 requests each", 50, 10, "/");
 }
 
 void test_statistics_accuracy(void) {
@@ -175,7 +174,7 @@ int main(void) {
         fprintf(stderr, "Please start the server first: ./server\n");
         return 1;
     }
-    printf("\n- Server is running on %s\n", SERVER_URL);
+    printf("\nServer is running on %s\n", SERVER_URL);
     
     test_basic_concurrency();
     test_no_dropped_connections();
@@ -186,8 +185,8 @@ int main(void) {
     printf("CONCURRENCY TEST SUMMARY\n");
     printf("================================================\n");
     printf("Total Tests Run:  %d\n", tests_run);
-    printf("Tests Passed:     %d Passed\n", tests_passed);
-    printf("Tests Failed:     %d Failed\n", tests_failed);
+    printf("Tests Passed:     %d\n", tests_passed);
+    printf("Tests Failed:     %d\n", tests_failed);
     printf("Success Rate:     %.1f%%\n", 
            tests_run > 0 ? (100.0 * tests_passed / tests_run) : 0.0);
     printf("================================================\n");

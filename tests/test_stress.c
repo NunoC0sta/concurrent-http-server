@@ -50,6 +50,7 @@ pid_t get_server_pid(void) {
     return pid;
 }
 
+// Returns process memory usage in KB
 long get_process_memory(pid_t pid) {
     char path[256];
     snprintf(path, sizeof(path), "/proc/%d/status", pid);
@@ -67,7 +68,7 @@ long get_process_memory(pid_t pid) {
         }
     }
     fclose(fp);
-    return vmrss; // in KB
+    return vmrss;
 }
 
 int check_zombie_processes(void) {
@@ -125,7 +126,7 @@ void* load_thread_fn(void* arg) {
             local_failure++;
         }
         
-        usleep(10000); // 10ms between requests
+        usleep(10000);
     }
     
     pthread_mutex_lock(args->lock);
@@ -142,7 +143,7 @@ void test_memory_leaks(void) {
     
     pid_t server_pid = get_server_pid();
     if (server_pid < 0) {
-        printf("  - FAILED - Cannot find server process\n");
+        printf("  FAILED - Cannot find server process\n");
         tests_failed++;
         tests_run++;
         return;
@@ -170,17 +171,17 @@ void test_memory_leaks(void) {
         }
         
         if (failures > 0) {
-            printf("  - FAILED - %d requests failed in cycle %d\n", failures, cycle + 1);
+            printf("  FAILED - %d requests failed in cycle %d\n", failures, cycle + 1);
             tests_failed++;
             tests_run++;
             return;
         }
         
-        sleep(2); // Let things settle
+        sleep(2);
         
         long mem = get_process_memory(server_pid);
         if (mem <= 0) {
-            printf("  - FAILED - Cannot read memory at cycle %d\n", cycle + 1);
+            printf("  FAILED - Cannot read memory at cycle %d\n", cycle + 1);
             tests_failed++;
             tests_run++;
             return;
@@ -199,12 +200,12 @@ void test_memory_leaks(void) {
     
     printf("  Maximum memory growth: %ld KB\n", max_growth);
     
-    // STRICT: Memory must not grow more than 10MB across cycles
+    // Test for memory leak against a 10MB limit (10000 KB)
     if (max_growth < 10000) {
-        printf("  - PASSED - No memory leak detected (<%ld KB growth)\n", max_growth);
+        printf("  PASSED - No memory leak detected (<%ld KB growth)\n", max_growth);
         tests_passed++;
     } else {
-        printf("  - FAILED - Memory leak detected (%ld KB growth exceeds 10MB limit)\n", max_growth);
+        printf("  FAILED - Memory leak detected (%ld KB growth exceeds 10MB limit)\n", max_growth);
         tests_failed++;
     }
     tests_run++;
@@ -217,7 +218,7 @@ void test_graceful_shutdown(void) {
     
     pid_t server_pid = get_server_pid();
     if (server_pid < 0) {
-        printf("  - FAILED - Cannot find server process\n");
+        printf("  FAILED - Cannot find server process\n");
         tests_failed++;
         tests_run++;
         return;
@@ -243,9 +244,9 @@ void test_graceful_shutdown(void) {
     pthread_t load_thread;
     pthread_create(&load_thread, NULL, load_thread_fn, &args);
     
-    // Wait for load to start
     sleep(2);
     
+    // Signal graceful shutdown
     printf("  Sending SIGTERM to server...\n");
     kill(server_pid, SIGTERM);
     
@@ -258,15 +259,15 @@ void test_graceful_shutdown(void) {
             shutdown_clean = 1;
             break;
         }
-        usleep(100000); // 100ms
+        usleep(100000);
     }
     
     stop_load = 1;
     pthread_join(load_thread, NULL);
     
     if (!shutdown_clean) {
-        printf("  - FAILED - Server did not terminate within 5 seconds\n");
-        kill(server_pid, SIGKILL); // Force kill
+        printf("  FAILED - Server did not terminate within 5 seconds\n");
+        kill(server_pid, SIGKILL);
         tests_failed++;
         tests_run++;
         pthread_mutex_destroy(&lock);
@@ -275,28 +276,26 @@ void test_graceful_shutdown(void) {
     
     printf("  Server terminated after %d ms\n", shutdown_time_ms);
     
-    sleep(1); // Let cleanup happen
+    sleep(1);
     
-    // Check for zombie processes
+    // Check for leftover resources
     int zombies = check_zombie_processes();
     printf("  Zombie processes: %d\n", zombies);
     
-    // Check for leftover shared memory
     int shm_count = check_shm_cleanup();
     printf("  Leftover /dev/shm files: %d\n", shm_count);
     
-    // STRICT: All conditions must pass
     if (zombies != 0) {
-        printf("  - FAILED - Zombie processes remain (%d found)\n", zombies);
+        printf("  FAILED - Zombie processes remain (%d found)\n", zombies);
         tests_failed++;
     } else if (shm_count != 0) {
-        printf("  - FAILED - IPC resources not cleaned (%d files in /dev/shm)\n", shm_count);
+        printf("  FAILED - IPC resources not cleaned (%d files in /dev/shm)\n", shm_count);
         tests_failed++;
     } else if (shutdown_time_ms > 3000) {
-        printf("  - FAILED - Shutdown took too long (%d ms > 3000 ms)\n", shutdown_time_ms);
+        printf("  FAILED - Shutdown took too long (%d ms > 3000 ms)\n", shutdown_time_ms);
         tests_failed++;
     } else {
-        printf("  - PASSED - Clean shutdown, no zombies, IPC cleaned, fast shutdown\n");
+        printf("  PASSED - Clean shutdown\n");
         tests_passed++;
     }
     tests_run++;
@@ -312,16 +311,16 @@ void test_zombie_processes(void) {
     int zombies = check_zombie_processes();
     
     if (zombies < 0) {
-        printf("  - FAILED - Cannot check for zombie processes\n");
+        printf("  FAILED - Cannot check for zombie processes\n");
         tests_failed++;
     } else if (zombies != 0) {
         printf("  Zombie processes: %d\n", zombies);
-        printf("  - FAILED - Zombie processes detected (%d found)\n", zombies);
+        printf("  FAILED - Zombie processes detected (%d found)\n", zombies);
         system("ps aux | grep defunct | grep server");
         tests_failed++;
     } else {
         printf("  Zombie processes: 0\n");
-        printf("  - PASSED - No zombies detected\n");
+        printf("  PASSED - No zombies detected\n");
         tests_passed++;
     }
     tests_run++;
@@ -334,21 +333,19 @@ int main(void) {
     printf("================================================\n");
     
     if (!check_server()) {
-        fprintf(stderr, "\n- CRITICAL FAILURE: Server not running on %s\n", SERVER_URL);
+        fprintf(stderr, "\nCRITICAL FAILURE: Server not running on %s\n", SERVER_URL);
         fprintf(stderr, "Please start the server first: ./server\n");
         return 1;
     }
-    printf("\n- Server is running on %s\n", SERVER_URL);
+    printf("\nServer is running on %s\n", SERVER_URL);
     
-    // Memory leak test
     test_memory_leaks();
     
     if (tests_failed > 0) {
-        printf("\n- STOPPING - Test 13 failed, not proceeding to shutdown tests\n");
+        printf("\nSTOPPING - Test 13 failed, not proceeding to shutdown tests\n");
         goto summary;
     }
     
-    // Tests that kill the server (run last)
     printf("\nWARNING: The following tests will terminate the server\n");
     printf("Proceeding automatically in 3 seconds...\n");
     sleep(3);
@@ -361,11 +358,11 @@ summary:
     printf("STRESS TEST SUMMARY\n");
     printf("================================================\n");
     printf("Total Tests Run:  %d\n", tests_run);
-    printf("Tests Passed:     %d Passed\n", tests_passed);
-    printf("Tests Failed:     %d Failed\n", tests_failed);
+    printf("Tests Passed:     %d\n", tests_passed);
+    printf("Tests Failed:     %d\n", tests_failed);
     
     if (tests_failed == 0 && tests_run == 3) {
-        printf("Success Rate:     100.0%% PASSED\n");
+        printf("Success Rate:     100.0%%\n");
         printf("================================================\n");
         printf("\n ALL STRESS TESTS PASSED!\n");
     } else {

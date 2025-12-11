@@ -8,7 +8,7 @@
 #include <sys/time.h>
 
 #define SERVER_URL "http://localhost:8080"
-#define LOG_FILE "./access.log"  // CORRIGIDO: Era ../access.log
+#define LOG_FILE "./access.log"
 
 int tests_run = 0, tests_passed = 0, tests_failed = 0;
 
@@ -76,17 +76,18 @@ void test_valgrind_helgrind(void) {
     int helgrind_available = (system("valgrind --tool=helgrind --version > /dev/null 2>&1") == 0);
     
     if (valgrind_available) {
-        printf("  - Valgrind is installed\n");
+        printf("  Valgrind is installed\n");
     } else {
-        printf("  - Valgrind not found (install: sudo apt-get install valgrind)\n");
+        printf("  Valgrind not found (install: sudo apt-get install valgrind)\n");
     }
     
     if (helgrind_available) {
-        printf("  - Helgrind is available\n");
+        printf("  Helgrind is available\n");
     } else {
-        printf("  - Helgrind not available\n");
+        printf("  Helgrind not available\n");
     }
     
+    // Instructions for running the external tool
     printf("\n  Run race detection with:\n");
     printf("    valgrind --tool=helgrind ./server\n");
     printf("  Then in another terminal:\n");
@@ -103,26 +104,9 @@ void test_valgrind_helgrind(void) {
 void test_log_integrity(void) {
     printf("\n[TEST 10] Log file integrity (no interleaved entries)\n");
     
-    // Verificar se o ficheiro de log existe
     printf("  Checking log file: %s\n", LOG_FILE);
     
-    struct stat st_check;
-    if (stat(LOG_FILE, &st_check) != 0) {
-        printf("  Log file does not exist yet: %s\n", LOG_FILE);
-        printf("  Creating it with a test request...\n");
-        
-        // Fazer um request para criar o ficheiro
-        CURL* curl = curl_easy_init();
-        if (curl) {
-            curl_easy_setopt(curl, CURLOPT_URL, SERVER_URL);
-            curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback);
-            curl_easy_perform(curl);
-            curl_easy_cleanup(curl);
-            sleep(1); // Dar tempo para escrever
-        }
-    }
-    
-    // Get initial log size
+    // Get initial log size/lines
     struct stat st_before;
     int has_log = (stat(LOG_FILE, &st_before) == 0);
     long initial_lines = 0;
@@ -135,12 +119,15 @@ void test_log_integrity(void) {
             fclose(f);
         }
     } else {
-        printf("  Still cannot access log file\n");
-        printf("  Please check:\n");
-        printf("    1. Server config LOG_FILE setting\n");
-        printf("    2. File permissions\n");
-        printf("    3. Current directory: ");
-        system("pwd");
+        printf("  Log file does not exist, creating it with a test request...\n");
+        CURL* curl = curl_easy_init();
+        if (curl) {
+            curl_easy_setopt(curl, CURLOPT_URL, SERVER_URL);
+            curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback);
+            curl_easy_perform(curl);
+            curl_easy_cleanup(curl);
+            sleep(1);
+        }
     }
     
     printf("  Initial log entries: %ld\n", initial_lines);
@@ -165,9 +152,9 @@ void test_log_integrity(void) {
     }
     
     printf("  Waiting 2 seconds for log flush...\n");
-    sleep(2); // Aumentado para 2 segundos
+    sleep(2);
     
-    // Check log after
+    // Check final log size/lines
     struct stat st_after;
     long final_lines = 0;
     
@@ -185,19 +172,11 @@ void test_log_integrity(void) {
     printf("  Expected: ~100\n");
     
     if (new_entries >= 90 && new_entries <= 110) {
-        printf("  - Log integrity maintained\n");
-        printf("  - Manual check: Verify no garbled/interleaved entries in %s\n", LOG_FILE);
+        printf("  Log integrity maintained\n");
+        printf("  Manual check: Verify no garbled/interleaved entries in %s\n", LOG_FILE);
         tests_passed++;
-    } else if (new_entries >= 50) {
-        printf("  Partial logging detected (%ld/100 entries)\n", new_entries);
-        printf("  This may indicate:\n");
-        printf("    - Some workers not initializing logger properly\n");
-        printf("    - File descriptor issues\n");
-        printf("    - Buffer flush delays\n");
-        tests_failed++;
     } else {
-        printf("  - Logging appears to be failing (only %ld/100 entries)\n", new_entries);
-        printf("  - Check that all workers call logger_init()\n");
+        printf("  Logging appears to be inconsistent (only %ld/100 entries)\n", new_entries);
         tests_failed++;
     }
     tests_run++;
@@ -214,7 +193,6 @@ void test_cache_consistency(void) {
     pthread_t threads[50];
     thread_args_t args[50];
     
-    // All threads request the same file (should hit cache after first)
     for (int i = 0; i < 50; i++) {
         args[i].thread_id = i;
         args[i].num_requests = 5;
@@ -231,10 +209,10 @@ void test_cache_consistency(void) {
     printf("  Successful: %d\n", stats.successful_requests);
     
     if (stats.successful_requests == stats.total_requests) {
-        printf("  - Cache consistency maintained (no corrupted reads)\n");
+        printf("  Cache consistency maintained\n");
         tests_passed++;
     } else {
-        printf("  - Cache inconsistency detected\n");
+        printf("  Cache inconsistency detected\n");
         tests_failed++;
     }
     tests_run++;
@@ -268,13 +246,12 @@ void test_statistics_counters(void) {
     printf("\n  Manual verification required:\n");
     printf("    1. Check %s/stats\n", SERVER_URL);
     printf("    2. Verify 'Total Requests' increased by ~100\n");
-    printf("    3. Verify no negative counters or overflow\n");
     
     if (stats.successful_requests >= 95) {
-        printf("  - Statistics counters appear consistent\n");
+        printf("  Statistics counters appear consistent\n");
         tests_passed++;
     } else {
-        printf("  - Possible lost updates detected\n");
+        printf("  Possible lost updates detected\n");
         tests_failed++;
     }
     tests_run++;
@@ -293,7 +270,7 @@ int main(void) {
         fprintf(stderr, "Please start the server first: ./server\n");
         return 1;
     }
-    printf("\n- Server is running on %s\n", SERVER_URL);
+    printf("\nServer is running on %s\n", SERVER_URL);
     
     test_valgrind_helgrind();
     test_log_integrity();
@@ -304,8 +281,8 @@ int main(void) {
     printf("SYNCHRONIZATION TEST SUMMARY\n");
     printf("================================================\n");
     printf("Total Tests Run:  %d\n", tests_run);
-    printf("Tests Passed:     %d Passed\n", tests_passed);
-    printf("Tests Failed:     %d Failed\n", tests_failed);
+    printf("Tests Passed:     %d\n", tests_passed);
+    printf("Tests Failed:     %d\n", tests_failed);
     printf("Success Rate:     %.1f%%\n", 
            tests_run > 0 ? (100.0 * tests_passed / tests_run) : 0.0);
     printf("================================================\n");
