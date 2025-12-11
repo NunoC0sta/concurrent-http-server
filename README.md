@@ -15,7 +15,7 @@ Autores
 
 ## Visão Geral
 Este projeto implementa um servidor web HTTP/1.1 multiprocesso e multi-thread que demonstra:
-* **Gestão de Processos:** Arquitetura Mestre-Trabalhador (Master-Worker) usando `fork()`.
+* **Gestão de Processos:** Arquitetura Mestre-Trabalhador (Master-Worker) usando "fork()".
 * **Comunicação Inter-Processos (IPC):** Memória partilhada e semáforos POSIX.
 * **Sincronização de Threads:** Mutexes Pthread, variáveis de condição e trincos de leitura-escrita (reader-writer locks).
 * **Tratamento de Pedidos Concorrentes:** Thread pools com padrão produtor-consumidor.
@@ -80,19 +80,29 @@ Funcionalidades Bónus
 
 ### 5. Estrutura do Projeto
 src/
-  main.c
-  master.c/h
-  worker.c/h
-  http.c/h
-  thread_pool.c/h
-  cache.c/h
-  logger.c/h
-  stats.c/h
-  config.c/h
-www/
-  index.html
-  errors/
+    main.c
+    master.c/h
+    worker.c/h
+    http.c/h
+    thread_pool.c/h
+    cache.c/h
+    logger.c/h
+    stats.c/h
+    config.c/h
+docs/
+    design.pdf
+    user_manual.pdf
+    technicaldoc.pdf
 tests/
+    test_concurrent.c
+    test_load.sh
+    README.md
+www/
+    index.html
+    errors/
+        404.html
+        500.html
+    Images/
 Makefile
 server.conf
 README.md
