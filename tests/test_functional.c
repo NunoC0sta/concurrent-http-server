@@ -220,7 +220,7 @@ int main(void) {
     printf("================================================\n");
     
     if (tests_failed > 0) {
-        printf("\n⚠ Some tests failed. Common issues:\n");
+        printf("\nSome tests failed. Common issues:\n");
         printf("  - Missing files in www/ directory\n");
         printf("  - Incorrect MIME type mapping in http.c\n");
         printf("  - DOCUMENT_ROOT misconfiguration in server.conf\n");

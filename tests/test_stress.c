@@ -137,120 +137,8 @@ void* load_thread_fn(void* arg) {
     return NULL;
 }
 
-void test_sustained_load(void) {
-    printf("\n[TEST 13] Sustained load test\n");
-    
-    pid_t server_pid = get_server_pid();
-    if (server_pid < 0) {
-        printf("  ✗ FAILED - Cannot find server process\n");
-        tests_failed++;
-        tests_run++;
-        return;
-    }
-    
-    printf("  Server PID: %d\n", server_pid);
-    printf("  Starting 30-second load test with 20 concurrent clients...\n");
-    
-    // Measure initial memory
-    long initial_mem = get_process_memory(server_pid);
-    if (initial_mem < 0) {
-        printf("  ✗ FAILED - Cannot read memory usage\n");
-        tests_failed++;
-        tests_run++;
-        return;
-    }
-    printf("  Initial memory: %ld KB\n", initial_mem);
-    
-    // Create load threads
-    int num_threads = 20;
-    int requests_per_thread = 150; // 20 threads × 150 = 3000 requests over 30s
-    pthread_t threads[num_threads];
-    load_thread_args_t args[num_threads];
-    
-    int success_count = 0, failure_count = 0;
-    volatile int stop_flag = 0;
-    pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
-    
-    struct timeval start, end;
-    gettimeofday(&start, NULL);
-    
-    // Start threads
-    for (int i = 0; i < num_threads; i++) {
-        args[i].id = i;
-        args[i].num_requests = requests_per_thread;
-        args[i].success_count = &success_count;
-        args[i].failure_count = &failure_count;
-        args[i].lock = &lock;
-        args[i].stop_flag = &stop_flag;
-        pthread_create(&threads[i], NULL, load_thread_fn, &args[i]);
-    }
-    
-    // Monitor for 30 seconds
-    int server_crashed = 0;
-    for (int i = 0; i < 30; i++) {
-        sleep(1);
-        if (kill(server_pid, 0) != 0) {
-            printf("  ✗ FAILED - Server crashed during load test at %d seconds!\n", i + 1);
-            server_crashed = 1;
-            stop_flag = 1;
-            break;
-        }
-    }
-    
-    // Stop and join threads
-    stop_flag = 1;
-    for (int i = 0; i < num_threads; i++) {
-        pthread_join(threads[i], NULL);
-    }
-    
-    gettimeofday(&end, NULL);
-    long duration_ms = (end.tv_sec - start.tv_sec) * 1000 + 
-                       (end.tv_usec - start.tv_usec) / 1000;
-    
-    // Check final memory
-    long final_mem = get_process_memory(server_pid);
-    long mem_increase = (final_mem > 0 && initial_mem > 0) ? 
-                        (final_mem - initial_mem) : -1;
-    
-    printf("  Duration: %ld ms\n", duration_ms);
-    printf("  Successful requests: %d\n", success_count);
-    printf("  Failed requests: %d\n", failure_count);
-    printf("  Total requests: %d\n", success_count + failure_count);
-    
-    if (final_mem > 0) {
-        printf("  Final memory: %ld KB\n", final_mem);
-        printf("  Memory increase: %ld KB\n", mem_increase);
-    }
-    
-    // STRICT PASS CRITERIA: 100% success, server alive, reasonable memory
-    int total_requests = success_count + failure_count;
-    int all_succeeded = (failure_count == 0 && total_requests > 0);
-    int server_alive = (kill(server_pid, 0) == 0);
-    int memory_ok = (mem_increase >= 0 && mem_increase < 100000); // Less than 100MB increase
-    
-    if (server_crashed) {
-        printf("  ✗ FAILED - Server crashed\n");
-        tests_failed++;
-    } else if (!all_succeeded) {
-        printf("  ✗ FAILED - Not all requests succeeded (%d failures)\n", failure_count);
-        tests_failed++;
-    } else if (!server_alive) {
-        printf("  ✗ FAILED - Server not responding after test\n");
-        tests_failed++;
-    } else if (!memory_ok) {
-        printf("  ✗ FAILED - Excessive memory growth (%ld KB)\n", mem_increase);
-        tests_failed++;
-    } else {
-        printf("  ✓ PASSED - 100%% success rate, server stable, memory OK\n");
-        tests_passed++;
-    }
-    tests_run++;
-    
-    pthread_mutex_destroy(&lock);
-}
-
 void test_memory_leaks(void) {
-    printf("\n[TEST 14] Memory leak detection\n");
+    printf("\n[TEST 13] Memory leak detection\n");
     
     pid_t server_pid = get_server_pid();
     if (server_pid < 0) {
@@ -323,9 +211,9 @@ void test_memory_leaks(void) {
 }
 
 void test_graceful_shutdown(void) {
-    printf("\n[TEST 15] Graceful shutdown under load\n");
+    printf("\n[TEST 14] Graceful shutdown under load\n");
     
-    printf("  ⚠ This test will terminate the server\n");
+    printf("  This test will terminate the server\n");
     
     pid_t server_pid = get_server_pid();
     if (server_pid < 0) {
@@ -417,7 +305,7 @@ void test_graceful_shutdown(void) {
 }
 
 void test_zombie_processes(void) {
-    printf("\n[TEST 16] No zombie processes check\n");
+    printf("\n[TEST 15] No zombie processes check\n");
     
     sleep(2);
     
@@ -442,7 +330,7 @@ void test_zombie_processes(void) {
 int main(void) {
     printf("================================================\n");
     printf("Stress Tests\n");
-    printf("Tests 13-16: Sustained Load, Memory, Shutdown\n");
+    printf("Tests 13-15: Memory Leak, Graceful Shutdown, Zombies\n");
     printf("================================================\n");
     
     if (!check_server()) {
@@ -452,23 +340,16 @@ int main(void) {
     }
     printf("\n✓ Server is running on %s\n", SERVER_URL);
     
-    // Tests that don't kill the server
-    test_sustained_load();
-    
-    if (tests_failed > 0) {
-        printf("\n✗ STOPPING - Test 13 failed, not proceeding to remaining tests\n");
-        goto summary;
-    }
-    
+    // Memory leak test
     test_memory_leaks();
     
     if (tests_failed > 0) {
-        printf("\n✗ STOPPING - Test 14 failed, not proceeding to shutdown tests\n");
+        printf("\n✗ STOPPING - Test 13 failed, not proceeding to shutdown tests\n");
         goto summary;
     }
     
     // Tests that kill the server (run last)
-    printf("\n⚠ WARNING: The following tests will terminate the server\n");
+    printf("\nWARNING: The following tests will terminate the server\n");
     printf("Proceeding automatically in 3 seconds...\n");
     sleep(3);
     
@@ -483,19 +364,19 @@ summary:
     printf("Tests Passed:     %d ✓\n", tests_passed);
     printf("Tests Failed:     %d ✗\n", tests_failed);
     
-    if (tests_failed == 0 && tests_run == 4) {
+    if (tests_failed == 0 && tests_run == 3) {
         printf("Success Rate:     100.0%% ✓✓✓\n");
         printf("================================================\n");
-        printf("\n🎉 ALL STRESS TESTS PASSED!\n");
+        printf("\n ALL STRESS TESTS PASSED!\n");
     } else {
         printf("Success Rate:     %.1f%%\n", 
                tests_run > 0 ? (100.0 * tests_passed / tests_run) : 0.0);
         printf("================================================\n");
-        printf("\n❌ STRESS TESTS FAILED\n");
+        printf("\n STRESS TESTS FAILED\n");
     }
     
     if (tests_failed > 0) {
-        printf("\n⚠ Server may need to be restarted:\n");
+        printf("\nServer may need to be restarted:\n");
         printf("  ./server\n");
     }
     
@@ -503,5 +384,7 @@ summary:
     printf("  valgrind --leak-check=full --show-leak-kinds=all ./server\n");
     printf("  Then: ab -n 1000 -c 50 http://localhost:8080/\n");
     
+    printf("\nFor manual sustained load testing run test_consitent_load.sh\n");
+
     return (tests_failed == 0) ? 0 : 1;
 }

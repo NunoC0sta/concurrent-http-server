@@ -84,7 +84,7 @@ void test_valgrind_helgrind(void) {
     if (helgrind_available) {
         printf("  ✓ Helgrind is available\n");
     } else {
-        printf("  ⚠ Helgrind not available\n");
+        printf("  X Helgrind not available\n");
     }
     
     printf("\n  Run race detection with:\n");
@@ -108,7 +108,7 @@ void test_log_integrity(void) {
     
     struct stat st_check;
     if (stat(LOG_FILE, &st_check) != 0) {
-        printf("  ⚠ Log file does not exist yet: %s\n", LOG_FILE);
+        printf("  Log file does not exist yet: %s\n", LOG_FILE);
         printf("  Creating it with a test request...\n");
         
         // Fazer um request para criar o ficheiro
@@ -135,7 +135,7 @@ void test_log_integrity(void) {
             fclose(f);
         }
     } else {
-        printf("  ⚠ Still cannot access log file\n");
+        printf("  Still cannot access log file\n");
         printf("  Please check:\n");
         printf("    1. Server config LOG_FILE setting\n");
         printf("    2. File permissions\n");
@@ -189,8 +189,8 @@ void test_log_integrity(void) {
         printf("  ✓ Manual check: Verify no garbled/interleaved entries in %s\n", LOG_FILE);
         tests_passed++;
     } else if (new_entries >= 50) {
-        printf("  ⚠ Partial logging detected (%ld/100 entries)\n", new_entries);
-        printf("  ⚠ This may indicate:\n");
+        printf("  Partial logging detected (%ld/100 entries)\n", new_entries);
+        printf("  This may indicate:\n");
         printf("    - Some workers not initializing logger properly\n");
         printf("    - File descriptor issues\n");
         printf("    - Buffer flush delays\n");
@@ -265,7 +265,7 @@ void test_statistics_counters(void) {
     
     printf("  Requests sent: 100\n");
     printf("  Requests successful: %d\n", stats.successful_requests);
-    printf("\n  ⚠ Manual verification required:\n");
+    printf("\n  Manual verification required:\n");
     printf("    1. Check %s/stats\n", SERVER_URL);
     printf("    2. Verify 'Total Requests' increased by ~100\n");
     printf("    3. Verify no negative counters or overflow\n");
@@ -310,7 +310,7 @@ int main(void) {
            tests_run > 0 ? (100.0 * tests_passed / tests_run) : 0.0);
     printf("================================================\n");
     
-    printf("\n⚠ IMPORTANT: Some tests require manual verification:\n");
+    printf("\nIMPORTANT: Some tests require manual verification:\n");
     printf("  - Run Helgrind: valgrind --tool=helgrind ./server\n");
     printf("  - Check log file: less %s\n", LOG_FILE);
     printf("  - Verify stats: curl %s/stats\n", SERVER_URL);
