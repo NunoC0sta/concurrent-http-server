@@ -47,7 +47,6 @@ cache_t* cache_init(size_t max_size_mb) {
     return cache;
 }
 
-/* Get entry from cache (returns NULL if not found) - uses read lock */
 cache_entry_t* cache_get(cache_t *cache, const char *key) {
     if (!cache || !key) return NULL;
     
@@ -55,10 +54,8 @@ cache_entry_t* cache_get(cache_t *cache, const char *key) {
     
     for (int i = 0; i < cache->num_entries; i++) {
         if (cache->entries[i].key && strcmp(cache->entries[i].key, key) == 0) {
-            /* Note: can't update accessed time with read lock, need write lock for that */
             pthread_rwlock_unlock(&cache->rwlock);
             
-            /* Acquire write lock to update timestamp */
             pthread_rwlock_wrlock(&cache->rwlock);
             cache->entries[i].accessed = time(NULL);
             pthread_rwlock_unlock(&cache->rwlock);
