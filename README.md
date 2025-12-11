@@ -64,13 +64,13 @@ Synchronization Features
 
 Bonus Features
 
-    [x] HTTP Keep-Alive (3 points)
-
     [x] Real-Time Dashboard (5 points)
 
     [x] Virtual Hosts (4 points)
 
     [x] Range Requests / Partial Content (3 points)
+
+    [] HTTP Keep-Alive
 
     [ ] CGI Suporte
 
