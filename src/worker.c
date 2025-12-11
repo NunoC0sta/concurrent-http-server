@@ -3,6 +3,7 @@
 #include "thread_pool.h"
 #include "http.h"
 #include "master.h"
+#include "cache.h" // <--- Importante: Incluir o header da cache
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -19,6 +20,7 @@ typedef struct {
     server_config_t *config;
     ipc_handles_t *ipc;
     int listen_fd;
+    cache_t *cache; // <--- Novo campo para guardar o ponteiro da cache
 } worker_state_t;
 
 // Anexo IPC simplificado para workers
@@ -38,7 +40,10 @@ static void *worker_thread_fn(void *arg) {
         if (client_fd < 0) continue;
 
         stats_inc_active(st->ipc);
-        http_handle_request(client_fd, st->config->document_root, st->ipc);
+        
+        // CORREÇÃO AQUI: Passamos st->cache como 4º argumento
+        http_handle_request(client_fd, st->config->document_root, st->ipc, st->cache);
+        
         stats_dec_active(st->ipc);
     }
     return NULL;
@@ -52,12 +57,30 @@ void worker_main(int worker_id, server_config_t *config, int listen_fd) {
     ipc_handles_t ipc;
     ipc_attach_worker(&ipc);
 
-    worker_state_t st = { .worker_id = worker_id, .config = config, .ipc = &ipc, .listen_fd = listen_fd };
+    // 1. INICIALIZAR A CACHE (Cada worker tem a sua)
+    printf("[WORKER %d] A iniciar cache com %d MB...\n", worker_id, config->cache_size_mb);
+    cache_t *local_cache = cache_init(config->cache_size_mb);
+
+    // 2. ADICIONAR AO ESTADO DO WORKER
+    worker_state_t st = { 
+        .worker_id = worker_id, 
+        .config = config, 
+        .ipc = &ipc, 
+        .listen_fd = listen_fd,
+        .cache = local_cache // <--- Guardar aqui
+    };
+
     thread_pool_t pool;
     thread_pool_init(&pool, config->threads_per_worker, worker_thread_fn, &st);
 
     while (!g_stop) sleep(1);
 
     thread_pool_shutdown(&pool);
+
+    // 3. LIMPAR A CACHE ANTES DE SAIR
+    if (local_cache) {
+        cache_destroy(local_cache);
+    }
+
     exit(0);
 }
