@@ -16,6 +16,7 @@ int thread_pool_init(thread_pool_t *pool, int num_threads, void *(*thread_fn)(vo
     pool->thread_fn = thread_fn;
     pool->arg = arg;
 
+    // Alocar array para guardar os IDs das threads
     pool->threads = calloc(num_threads, sizeof(pthread_t));
     if (!pool->threads) return -1;
 
@@ -23,16 +24,18 @@ int thread_pool_init(thread_pool_t *pool, int num_threads, void *(*thread_fn)(vo
         printf("[THREAD_POOL] Creating thread %d...\n", i);
         fflush(stdout);
         
+        // Lançar a thread
         int rc = pthread_create(&pool->threads[i], NULL, thread_fn, arg);
         if (rc != 0) {
             fprintf(stderr, "[THREAD_POOL] pthread_create failed with error %d\n", rc);
             perror("pthread_create");
-            /* attempt to cancel/join previously created threads */
+            
+            // Se falhar a criação de uma thread, tenta limpar as que já foram criadas
             for (int j = 0; j < i; ++j) {
-                pthread_kill(pool->threads[j], SIGTERM);
+                pthread_kill(pool->threads[j], SIGTERM); // Tenta enviar sinal para interromper
             }
             for (int j = 0; j < i; ++j) {
-                pthread_join(pool->threads[j], NULL);
+                pthread_join(pool->threads[j], NULL); // Espera que as interrompidas terminem
             }
             free(pool->threads);
             pool->threads = NULL;
@@ -52,17 +55,16 @@ int thread_pool_init(thread_pool_t *pool, int num_threads, void *(*thread_fn)(vo
 void thread_pool_shutdown(thread_pool_t *pool) {
     if (!pool || !pool->threads) return;
 
-    /* Try to interrupt threads that may be blocked on semaphores by sending SIGTERM to the thread
-       (pthread_kill with SIGTERM), this will cause sem_wait to return with EINTR in many cases.
-       Caller must ensure thread_fn checks for termination (global flag or similar). */
     for (int i = 0; i < pool->num_threads; ++i) {
         pthread_kill(pool->threads[i], SIGTERM);
     }
 
+    // Espera que todas as threads terminem
     for (int i = 0; i < pool->num_threads; ++i) {
         pthread_join(pool->threads[i], NULL);
     }
 
+    // Liberta a memória do array de IDs
     free(pool->threads);    
     pool->threads = NULL;
 }

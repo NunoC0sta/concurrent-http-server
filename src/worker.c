@@ -3,7 +3,7 @@
 #include "thread_pool.h"
 #include "http.h"
 #include "master.h"
-#include "logger.h"  // <--- IMPORTANTE: Adicionar este include
+#include "logger.h"
 #include "cache.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -36,7 +36,6 @@ int ipc_attach_worker(ipc_handles_t *handles) {
 static void *worker_thread_fn(void *arg) {
     worker_state_t *st = (worker_state_t*)arg;
     while (!g_stop) {
-        // Shared Port Accept: O Kernel distribui a carga
         int client_fd = accept(st->listen_fd, NULL, NULL);
         if (client_fd < 0) continue;
 
@@ -62,14 +61,13 @@ void worker_main(int worker_id, server_config_t *config, int listen_fd) {
         exit(1);
     }
 
-    // CORREÇÃO: Inicializar o logger em cada worker process
     printf("[WORKER %d] Initializing logger: %s\n", worker_id, config->log_file);
     if (logger_init(config->log_file) != 0) {
         fprintf(stderr, "[WORKER %d] Failed to initialize logger\n", worker_id);
         exit(1);
     }
 
-    // Inicializar a cache (cada worker tem a sua própria cache)
+    // Inicializar a cache
     printf("[WORKER %d] Initializing cache with %d MB...\n", worker_id, config->cache_size_mb);
     cache_t *local_cache = cache_init(config->cache_size_mb);
     if (!local_cache) {
@@ -98,7 +96,6 @@ void worker_main(int worker_id, server_config_t *config, int listen_fd) {
 
     printf("[WORKER %d] Ready with %d threads\n", worker_id, config->threads_per_worker);
 
-    // Loop principal - aguardar sinal de shutdown
     while (!g_stop) sleep(1);
 
     printf("[WORKER %d] Shutting down...\n", worker_id);
@@ -110,7 +107,6 @@ void worker_main(int worker_id, server_config_t *config, int listen_fd) {
         cache_destroy(local_cache);
     }
 
-    // CORREÇÃO: Fazer cleanup do logger antes de sair
     logger_cleanup();
 
     printf("[WORKER %d] Exiting\n", worker_id);
