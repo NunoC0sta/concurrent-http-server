@@ -82,7 +82,7 @@ void serve_dashboard(int client_fd, ipc_handles_t* ipc) {
     char body[8192];
     int body_len = snprintf(body, sizeof(body),
         "<!DOCTYPE html><html><head><title>Monitor Completo</title>"
-        "<meta charset='UTF-8'>" // <--- CORREÇÃO 1: Define a codificação no HTML
+        "<meta charset='UTF-8'>"
         "<meta http-equiv='refresh' content='2'>"
         "<style>"
         "body{font-family:'Segoe UI',sans-serif;padding:20px;background:#f0f2f5;color:#333;}"
