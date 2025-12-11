@@ -9,7 +9,6 @@
 #include <sys/stat.h>
 #include <sys/socket.h>
 #include <sys/time.h>
-#include <errno.h>
 #include <time.h>
 
 const char* get_mime_type(const char* path) {
@@ -20,7 +19,6 @@ const char* get_mime_type(const char* path) {
     if (strcmp(dot, ".js") == 0) return "application/javascript";
     if (strcmp(dot, ".png") == 0) return "image/png";
     if (strcmp(dot, ".jpg") == 0) return "image/jpeg";
-    if (strcmp(dot, ".ico") == 0) return "image/x-icon";
     return "text/plain";
 }
 
@@ -48,25 +46,39 @@ int parse_http_request(const char* buffer, char** method, char** path) {
     return 0;
 }
 
-// Helper para atualizar estatísticas com tempo
-void update_stats_full(ipc_handles_t* ipc, int code, size_t bytes, long ms_taken) {
-    sem_wait(ipc->sem_stats);
-    server_stats_t *s = &ipc->shared_data->stats;
-    s->total_requests++;
-    s->bytes_transferred += bytes;
-    s->total_response_time_ms += ms_taken;
+// --- FUNÇÃO NOVA: Vai buscar o teu HTML à pasta errors/ ---
+void serve_custom_error(int client_fd, int code, const char* doc_root, ipc_handles_t* ipc) {
+    char error_path[1024];
+    // Constrói o caminho: ./www/errors/404.html
+    snprintf(error_path, sizeof(error_path), "%s/errors/%d.html", doc_root, code);
 
-    switch(code) {
-        case 200: s->status_200++; break;
-        case 403: s->status_403++; break;
-        case 404: s->status_404++; break;
-        case 500: s->status_500++; break;
-        case 503: s->status_503++; break;
+    FILE* f = fopen(error_path, "rb");
+    if (f) {
+        fseek(f, 0, SEEK_END); long size = ftell(f); fseek(f, 0, SEEK_SET);
+        
+        char header[512];
+        int hlen = snprintf(header, sizeof(header), 
+            "HTTP/1.1 %d Not Found\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: %ld\r\nConnection: close\r\n\r\n", code, size);
+        
+        send_all(client_fd, header, hlen);
+        
+        char buf[4096]; size_t n;
+        while ((n = fread(buf, 1, sizeof(buf), f)) > 0) send_all(client_fd, buf, n);
+        fclose(f);
+    } else {
+        // Se não encontrar o ficheiro, manda erro simples
+        char msg[128];
+        int len = snprintf(msg, sizeof(msg), "HTTP/1.1 %d Error\r\nContent-Length: 0\r\n\r\n", code);
+        send_all(client_fd, msg, len);
     }
+
+    sem_wait(ipc->sem_stats);
+    ipc->shared_data->stats.total_requests++;
+    if (code == 404) ipc->shared_data->stats.status_404++;
+    else if (code == 500) ipc->shared_data->stats.status_500++;
     sem_post(ipc->sem_stats);
 }
 
-// --- DASHBOARD COMPLETO ---
 void serve_dashboard(int client_fd, ipc_handles_t* ipc) {
     sem_wait(ipc->sem_stats);
     server_stats_t s = ipc->shared_data->stats;
@@ -83,9 +95,8 @@ void serve_dashboard(int client_fd, ipc_handles_t* ipc) {
     char body[8192];
     int body_len = snprintf(body, sizeof(body),
         "<!DOCTYPE html><html><head><title>Monitor Completo</title>"
-        "<meta charset='UTF-8'>"
+        "<meta charset='UTF-8'>" // Garante que os acentos funcionam
         "<meta http-equiv='refresh' content='2'>"
-        "<link rel='icon' href='data:,'>"  // Prevents favicon request
         "<style>"
         "body{font-family:'Segoe UI',sans-serif;padding:20px;background:#f0f2f5;color:#333;}"
         ".grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:20px;}"
@@ -94,31 +105,31 @@ void serve_dashboard(int client_fd, ipc_handles_t* ipc) {
         "h2{font-size:1.1em;color:#5f6368;border-bottom:1px solid #eee;padding-bottom:10px;margin-top:0;}"
         ".row{display:flex;justify-content:space-between;margin:8px 0;font-size:1.05em;}"
         ".val{font-weight:bold;color:#1a73e8;}"
-        ".err{color:#d93025;} .ok{color:#188038;}"
+        ".err{color:#d93025;} .ok{color:#188038;} .warn{color:#f57f17;}"
         "</style></head>"
         "<body>"
-        "<h1>📊 Dashboard do Servidor</h1>"
+        "<h1>Dashboard do Servidor</h1>"
         "<div class='grid'>"
-
-        "<div class='card'><h2>🚀 Performance</h2>"
+        
+        "<div class='card'><h2>Performance</h2>"
         "<div class='row'><span>Uptime:</span> <span class='val'>%ld s</span></div>"
         "<div class='row'><span>Conexões Ativas:</span> <span class='val'>%d</span></div>"
         "<div class='row'><span>Tempo Médio:</span> <span class='val'>%.2f ms</span></div>"
         "</div>"
-
-        "<div class='card'><h2>📡 Tráfego</h2>"
+        
+        "<div class='card'><h2>Tráfego</h2>"
         "<div class='row'><span>Total Pedidos:</span> <span class='val'>%lu</span></div>"
         "<div class='row'><span>Dados Enviados:</span> <span class='val'>%.2f MB</span></div>"
         "</div>"
-
-        "<div class='card'><h2>📋 Códigos de Resposta</h2>"
+        
+        "<div class='card'><h2>Códigos de Resposta</h2>"
         "<div class='row'><span>200 OK:</span> <span class='val ok'>%u</span></div>"
-        "<div class='row'><span>403 Forbidden:</span> <span class='val err'>%u</span></div>"
-        "<div class='row'><span>404 Not Found:</span> <span class='val err'>%u</span></div>"
+        "<div class='row'><span>403 Forbidden:</span> <span class='val warn'>%u</span></div>"
+        "<div class='row'><span>404 Not Found:</span> <span class='val warn'>%u</span></div>"
         "<div class='row'><span>500 Error:</span> <span class='val err'>%u</span></div>"
         "<div class='row'><span>503 Busy:</span> <span class='val err'>%u</span></div>"
         "</div>"
-
+        
         "</div></body></html>",
         uptime, s.active_connections, avg_time,
         s.total_requests, (double)s.bytes_transferred / (1024*1024),
@@ -127,47 +138,44 @@ void serve_dashboard(int client_fd, ipc_handles_t* ipc) {
     char header[512];
     int hlen = snprintf(header, sizeof(header),
         "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: %d\r\n\r\n", body_len);
-
+    
     send_all(client_fd, header, hlen);
     send_all(client_fd, body, body_len);
 }
 
-int serve_file(int client_fd, const char* path, ipc_handles_t* ipc, long* ms_taken) {
+void serve_file(int client_fd, const char* path, const char* doc_root, ipc_handles_t* ipc) {
     struct timespec start, end;
     clock_gettime(CLOCK_MONOTONIC, &start);
 
     FILE* f = fopen(path, "rb");
     if (!f) {
-        char* msg = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n";
-        send_all(client_fd, msg, strlen(msg));
-
-        clock_gettime(CLOCK_MONOTONIC, &end);
-        *ms_taken = (end.tv_sec - start.tv_sec) * 1000 + (end.tv_nsec - start.tv_nsec) / 1000000;
-
-        update_stats_full(ipc, 404, 0, *ms_taken);
-        return 404;
+        // SE NÃO ENCONTRAR O FICHEIRO, CHAMA A TUA PÁGINA 404
+        serve_custom_error(client_fd, 404, doc_root, ipc);
+        return;
     }
 
     fseek(f, 0, SEEK_END); long size = ftell(f); fseek(f, 0, SEEK_SET);
     char header[1024];
-    int hlen = snprintf(header, sizeof(header),
-        "HTTP/1.1 200 OK\r\nContent-Type: %s\r\nContent-Length: %ld\r\nConnection: keep-alive\r\n\r\n",
+    int hlen = snprintf(header, sizeof(header), 
+        "HTTP/1.1 200 OK\r\nContent-Type: %s\r\nContent-Length: %ld\r\nConnection: keep-alive\r\n\r\n", 
         get_mime_type(path), size);
-
     send_all(client_fd, header, hlen);
-
     char buf[4096]; size_t n;
     while ((n = fread(buf, 1, sizeof(buf), f)) > 0) send_all(client_fd, buf, n);
     fclose(f);
-
+    
     clock_gettime(CLOCK_MONOTONIC, &end);
-    *ms_taken = (end.tv_sec - start.tv_sec) * 1000 + (end.tv_nsec - start.tv_nsec) / 1000000;
-
-    update_stats_full(ipc, 200, size, *ms_taken);
-    return 200;
+    long ms = (end.tv_sec - start.tv_sec) * 1000 + (end.tv_nsec - start.tv_nsec) / 1000000;
+    
+    sem_wait(ipc->sem_stats);
+    ipc->shared_data->stats.total_requests++;
+    ipc->shared_data->stats.bytes_transferred += size;
+    ipc->shared_data->stats.status_200++;
+    ipc->shared_data->stats.total_response_time_ms += ms;
+    sem_post(ipc->sem_stats);
 }
 
-void http_handle_request(int client_fd, const char *document_root, ipc_handles_t *ipc) {
+void http_handle_request(int client_fd, const char *doc_root, ipc_handles_t *ipc) {
     struct timeval tv = {5, 0};
     setsockopt(client_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
     char buffer[4096];
@@ -180,35 +188,20 @@ void http_handle_request(int client_fd, const char *document_root, ipc_handles_t
         char *method = NULL, *path = NULL;
         if (parse_http_request(buffer, &method, &path) != 0) break;
 
-        long ms_taken = 0;
-
-        // Silently ignore favicon requests
-        if (strcmp(path, "/favicon.ico") == 0) {
-            char* msg = "HTTP/1.1 204 No Content\r\n\r\n";
-            send_all(client_fd, msg, strlen(msg));
-            free(method); 
-            free(path);
-            continue; // Don't break, continue handling keep-alive
-        }
-        // Handle /stats dashboard
-        else if (strcmp(path, "/stats") == 0) {
+        if (strcmp(path, "/stats") == 0) {
             serve_dashboard(client_fd, ipc);
             log_request(ipc, "127.0.0.1", "/stats", method, 200, 0);
-        } 
-        // Handle regular file requests
-        else {
-            char full_path[1024];
-            if (strcmp(path, "/") == 0) 
-                snprintf(full_path, sizeof(full_path), "%s/index.html", document_root);
-            else 
-                snprintf(full_path, sizeof(full_path), "%s%s", document_root, path);
-
-            int status = serve_file(client_fd, full_path, ipc, &ms_taken);
-            log_request(ipc, "127.0.0.1", path, method, status, 0);
+        } else {
+            char full[1024];
+            if (strcmp(path, "/") == 0) snprintf(full, sizeof(full), "%s/index.html", doc_root);
+            else snprintf(full, sizeof(full), "%s%s", doc_root, path);
+            
+            // Passamos o doc_root para ele saber onde está a pasta /errors/
+            serve_file(client_fd, full, doc_root, ipc);
+            
+            log_request(ipc, "127.0.0.1", path, method, 200, 0);
         }
-
-        free(method); 
-        free(path);
+        free(method); free(path);
     }
     close(client_fd);
 }

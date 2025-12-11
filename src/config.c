@@ -11,7 +11,6 @@ int load_config(const char* filename, server_config_t* config) {
 
     while (fgets(line, sizeof(line), fp)) {
         // Ignora comentários (#) e linhas vazias (\n)
-        // (Exatamente como pede o template)
         if (line[0] == '#' || line[0] == '\n') continue;
 
         if (sscanf(line, "%[^=]=%s", key, value) == 2) {
