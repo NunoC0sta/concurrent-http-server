@@ -1,87 +1,87 @@
-# Servidor Web Multi-Threaded com IPC e Semáforos
+# Multi-Threaded Web Server with IPC and Semaphores
 **Sistemas Operativos - TP2**
 
-Um servidor web HTTP/1.1 concorrente de nível de produção, implementando sincronização avançada de processos e threads utilizando semáforos POSIX, memória partilhada e thread pools.
+A production-level concurrent HTTP/1.1 web server, implementing advanced process and thread synchronization using POSIX semaphores, shared memory, and thread pools.
 
-## Índice
-Visão Geral
-Início Rápido
-Funcionalidades
-Estrutura do Projeto
-Configuração
-Testes
-Detalhes de Implementação
-Autores
+## Table of Contents
+Overview
+Quick Start
+Features
+Project Structure
+Configuration
+Testing
+Implementation Details
+Authors
 
-## Visão Geral
-Este projeto implementa um servidor web HTTP/1.1 multiprocesso e multi-thread que demonstra:
-* **Gestão de Processos:** Arquitetura Mestre-Trabalhador (Master-Worker) usando "fork()".
-* **Comunicação Inter-Processos (IPC):** Memória partilhada e semáforos POSIX.
-* **Sincronização de Threads:** Mutexes Pthread, variáveis de condição e trincos de leitura-escrita (reader-writer locks).
-* **Tratamento de Pedidos Concorrentes:** Thread pools com padrão produtor-consumidor.
-* **Protocolo HTTP:** Suporte HTTP/1.1 incluindo métodos GET e HEAD.
-* **Gestão de Recursos:** Cache de ficheiros LRU thread-safe e rastreio de estatísticas.
+## Overview
+This project implements a multi-process and multi-threaded HTTP/1.1 web server that demonstrates:
+* **Process Management:** Master-Worker architecture using fork().
+* **Inter-Process Communication (IPC):** Shared memory and POSIX semaphores.
+* **Thread Synchronization:** Pthread mutexes, condition variables, and reader-writer locks.
+* **Concurrent Request Handling:** Thread pools using the producer-consumer pattern.
+* **HTTP Protocol:** HTTP/1.1 support including GET and HEAD methods.
+* **Resource Management:** Thread-safe LRU file cache and statistics tracking.
 
-## Início Rápido
+## Quick Start
 
-### 1. Compilação
-Compila o servidor usando o Make:
+### 1. Compilation
+Compile the server using Make:
 make clean && make
 
-### 2. Executar o Servidor
-Inicia o servidor na porta padrão (8080):
+### 2. Run Server
+Start the server on the default port (8080):
 ./server
 
-### 3. Aceder
+### 3. Access
 Browser: http://localhost:8080
 Curl: curl -v http://localhost:8080/index.html
 
 
-### 4. Funcionalidades
-Funcionalidades Principais (Core)
+### 4. Features
+Core Features:
 
-    [x] Arquitetura Multi-Processo: 1 mestre + N trabalhadores.
+    [x] Multi-Process Architecture: 1 Master + N Workers.
 
-    [x] Thread Pools: Padrão Produtor-Consumidor.
+    [x] Thread Pools: Producer-Consumer pattern.
 
-    [x] Suporte HTTP/1.1: Métodos GET e HEAD.
+    [x] HTTP/1.1 Support: GET and HEAD methods.
 
-    [x] Códigos de Estado: 200, 404, 403, 500, 503.
+    [x] Status Codes: 200, 404, 403, 500, 503.
 
-    [x] Tipos MIME: HTML, CSS, JavaScript, imagens (PNG, JPG), PDF.
+    [x] MIME Types: HTML, CSS, JavaScript, Images (PNG, JPG), PDF.
 
-    [x] Páginas de Erro Personalizadas: Páginas 404 e 500 customizadas.
+    [x] Custom Error Pages: Custom 404 and 500 pages.
 
-Funcionalidades de Sincronização
+Synchronization Features
 
-    [x] Semáforos POSIX: Sincronização entre processos.
+    [x] POSIX Semaphores: Synchronization between processes.
 
-    [x] Mutexes Pthread: Exclusão mútua ao nível da thread.
+    [x] Pthread Mutexes: Thread-level mutual exclusion.
 
-    [x] Variáveis de Condição: Sinalização da fila de conexões.
+    [x] Condition Variables: Signaling for the connection queue.
 
-    [x] Trincos Leitura-Escrita (RW Locks): Acesso seguro à cache de ficheiros.
+    [x] Read-Write Locks (RW Locks): Safe access to the file cache.
 
-Funcionalidades Bónus
+Bonus Features
 
     ### Funcionalidades Bónus Implementadas
-    [x] HTTP Keep-Alive (3 pontos)
+    [x] HTTP Keep-Alive (3 points)
 
-    [x] Dashboard em Tempo Real (5 pontos)
+    [x] Real-Time Dashboard (5 points)
 
-    [x] Virtual Hosts (4 pontos)
+    [x] Virtual Hosts (4 points)
 
-    [x] Range Requests / Partial Content (3 pontos)
+    [x] Range Requests / Partial Content (3 points)
 
     [ ] Suporte CGI
 
     [ ] Suporte HTTPS
 
 
-### 5. Estrutura do Projeto
+### 5. Project Structure
 src/
     main.c
-    master.c/h
+    master.c/h  
     worker.c/h
     http.c/h
     thread_pool.c/h
@@ -107,37 +107,37 @@ Makefile
 server.conf
 README.md
 
-### 6. Testes
+### 6. Testing
 
 Fazer quando tivermos os testes
 
-### 7. Detalhes de Implementação
-Processo Mestre
+### 7. Implementation Details
+Master Process
 
-    Inicializa o socket de escuta.
+    Initializes the listening socket.
 
-    Cria memória partilhada e semáforos.
+    Creates shared memory and semaphores.
 
-    Faz fork de N processos trabalhadores.
+    Forks N worker processes.
 
-    Aceita conexões e coloca-as na fila partilhada (Produtor).
+    Accepts connections and places them into the shared queue (Producer).
 
-Processos Trabalhadores
+Worker Processes
 
-    Mantém uma thread pool de tamanho fixo.
+    Maintains a fixed-size thread pool.
 
-    Threads retiram conexões da fila partilhada (Consumidor).
+    Threads retrieve connections from the shared queue (Consumer).
 
-    Atualiza estatísticas partilhadas atomicamente.
+    Atomically updates shared statistics.
 
-    Faz cache de ficheiros em memória usando um algoritmo LRU protegido por trincos Leitura-Escrita.
+    Caches files in memory using an LRU algorithm protected by Read-Write locks.
 
 
-### 8. Problemas Conhecidos
+### 8. Known Issues
  
 Fazer depois também
 
-### Autores
+### Authors
 
     Martim Travesso Dias
 
