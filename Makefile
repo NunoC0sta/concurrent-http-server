@@ -50,6 +50,26 @@ run_tests: tests
 	@echo "Running Stress Tests (manual verification required)..."
 	./tests/test_stress
 
+valgrind: $(TARGET)
+	@echo "========================================================"
+	@echo "  A CORRER SERVIDOR COM VALGRIND (Verificação de Fugas de Memória)"
+	@echo "========================================================"
+	@echo "PASSOS SEGUINTES:"
+	@echo "  1. Abrir um NOVO TERMINAL."
+	@echo "  2. Executar um teste de carga: ab -n 5000 -c 100 http://localhost:8080/"
+	@echo "  3. Verificar a saída do Valgrind: deve reportar 'definitely lost: 0 bytes'."
+	valgrind --leak-check=full --show-leak-kinds=all ./server
+
+helgrind: $(TARGET)
+	@echo "========================================================"
+	@echo "  A CORRER SERVIDOR COM HELGRIND (Verificação de Race Conditions)"
+	@echo "========================================================"
+	@echo "PASSOS SEGUINTES:"
+	@echo "  1. Abrir um NOVO TERMINAL."
+	@echo "  2. Executar um teste de carga: ab -n 5000 -c 100 http://localhost:8080/"
+	@echo "  3. Verificar a saída do Helgrind: não deve reportar avisos de 'potential data race'."
+	valgrind --tool=helgrind ./server
+
 clean_tests:
 	rm -f tests/test_functional tests/test_concurrent tests/test_synchronization tests/test_stress
 
