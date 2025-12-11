@@ -64,15 +64,18 @@ Funcionalidades de Sincronização
 
 Funcionalidades Bónus
 
-    [x] HTTP Keep-Alive: Conexões persistentes.
+    ### Funcionalidades Bónus Implementadas
+    [x] HTTP Keep-Alive (3 pontos)
 
-    [x] Dashboard em Tempo Real: Visualizador de estatísticas via Web.
+    [x] Dashboard em Tempo Real (5 pontos)
 
-    [ ] Suporte CGI: Execução de scripts dinâmicos.
+    [x] Virtual Hosts (4 pontos)
 
-    [x] Virtual Hosts: Múltiplos domínios num servidor.
+    [x] Range Requests / Partial Content (3 pontos)
 
-    [ ] Suporte HTTPS: Encriptação SSL/TLS.
+    [ ] Suporte CGI
+
+    [ ] Suporte HTTPS
 
 
 ### 5. Estrutura do Projeto
