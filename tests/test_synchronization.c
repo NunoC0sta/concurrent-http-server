@@ -8,7 +8,7 @@
 #include <sys/time.h>
 
 #define SERVER_URL "http://localhost:8080"
-#define LOG_FILE "../access.log"
+#define LOG_FILE "./access.log"  // CORRIGIDO: Era ../access.log
 
 int tests_run = 0, tests_passed = 0, tests_failed = 0;
 
@@ -103,6 +103,25 @@ void test_valgrind_helgrind(void) {
 void test_log_integrity(void) {
     printf("\n[TEST 10] Log file integrity (no interleaved entries)\n");
     
+    // Verificar se o ficheiro de log existe
+    printf("  Checking log file: %s\n", LOG_FILE);
+    
+    struct stat st_check;
+    if (stat(LOG_FILE, &st_check) != 0) {
+        printf("  ⚠ Log file does not exist yet: %s\n", LOG_FILE);
+        printf("  Creating it with a test request...\n");
+        
+        // Fazer um request para criar o ficheiro
+        CURL* curl = curl_easy_init();
+        if (curl) {
+            curl_easy_setopt(curl, CURLOPT_URL, SERVER_URL);
+            curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback);
+            curl_easy_perform(curl);
+            curl_easy_cleanup(curl);
+            sleep(1); // Dar tempo para escrever
+        }
+    }
+    
     // Get initial log size
     struct stat st_before;
     int has_log = (stat(LOG_FILE, &st_before) == 0);
@@ -115,6 +134,13 @@ void test_log_integrity(void) {
             while (fgets(line, sizeof(line), f)) initial_lines++;
             fclose(f);
         }
+    } else {
+        printf("  ⚠ Still cannot access log file\n");
+        printf("  Please check:\n");
+        printf("    1. Server config LOG_FILE setting\n");
+        printf("    2. File permissions\n");
+        printf("    3. Current directory: ");
+        system("pwd");
     }
     
     printf("  Initial log entries: %ld\n", initial_lines);
@@ -138,7 +164,8 @@ void test_log_integrity(void) {
         pthread_join(threads[i], NULL);
     }
     
-    sleep(1); // Allow log flush
+    printf("  Waiting 2 seconds for log flush...\n");
+    sleep(2); // Aumentado para 2 segundos
     
     // Check log after
     struct stat st_after;
@@ -161,8 +188,16 @@ void test_log_integrity(void) {
         printf("  ✓ Log integrity maintained\n");
         printf("  ✓ Manual check: Verify no garbled/interleaved entries in %s\n", LOG_FILE);
         tests_passed++;
+    } else if (new_entries >= 50) {
+        printf("  ⚠ Partial logging detected (%ld/100 entries)\n", new_entries);
+        printf("  ⚠ This may indicate:\n");
+        printf("    - Some workers not initializing logger properly\n");
+        printf("    - File descriptor issues\n");
+        printf("    - Buffer flush delays\n");
+        tests_failed++;
     } else {
-        printf("  ✗ Unexpected log entry count (possible missing writes)\n");
+        printf("  ✗ Logging appears to be failing (only %ld/100 entries)\n", new_entries);
+        printf("  ✗ Check that all workers call logger_init()\n");
         tests_failed++;
     }
     tests_run++;
