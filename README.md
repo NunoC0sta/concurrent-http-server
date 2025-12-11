@@ -221,7 +221,8 @@ Worker Processes
 
 ### 8. Known Issues
  
-Currently there are no known Issues
+* **Worker Shutdown Latency (`worker.c`):** The worker process delays server shutdown by up to one second per loop iteration because it unnecessarily pauses using `sleep(1)` while waiting for the stop signal.
+* **Cache Array Hygiene (`cache.c`):** When cleaning the cache by removing the Least Recently Used (LRU) entry and compacting the entry array, the code fails to explicitly nullify the final element, leaving unnecessary "ghost" data in the structure.
 
 ### Authors
 
