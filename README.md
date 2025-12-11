@@ -64,7 +64,6 @@ Synchronization Features
 
 Bonus Features
 
-    ### Funcionalidades Bónus Implementadas
     [x] HTTP Keep-Alive (3 points)
 
     [x] Real-Time Dashboard (5 points)
@@ -73,9 +72,9 @@ Bonus Features
 
     [x] Range Requests / Partial Content (3 points)
 
-    [ ] Suporte CGI
+    [ ] CGI Suporte
 
-    [ ] Suporte HTTPS
+    [ ] HTTPS Suporte
 
 
 ### 5. Project Structure
