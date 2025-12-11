@@ -77,7 +77,7 @@ void test_file_types(void) {
     for (size_t i = 0; i < sizeof(files)/sizeof(files[0]); i++) {
         // Check if file exists locally first
         if (!file_exists(files[i].local_path)) {
-            printf("  ⊘ %s (skipped - file doesn't exist in www/)\n", files[i].file);
+            printf("  - %s (skipped - file doesn't exist in www/)\n", files[i].file);
             continue;
         }
         
@@ -86,10 +86,10 @@ void test_file_types(void) {
         long status = get_http_status(url, 0);
         
         if (status == 200) {
-            printf("  ✓ %s (HTTP %ld)\n", files[i].file, status);
+            printf("  - %s (HTTP %ld)\n", files[i].file, status);
             tests_passed++;
         } else {
-            printf("  ✗ %s (HTTP %ld - expected 200)\n", files[i].file, status);
+            printf("  - %s (HTTP %ld - expected 200)\n", files[i].file, status);
             tests_failed++;
         }
         tests_run++;
@@ -102,10 +102,10 @@ void test_status_codes(void) {
     // Test 200 OK
     long status = get_http_status(SERVER_URL "/", 0);
     if (status == 200) {
-        printf("  ✓ GET / = %ld (OK)\n", status);
+        printf("  - GET / = %ld (OK)\n", status);
         tests_passed++;
     } else {
-        printf("  ✗ GET / = %ld (expected 200)\n", status);
+        printf("  - GET / = %ld (expected 200)\n", status);
         tests_failed++;
     }
     tests_run++;
@@ -113,10 +113,10 @@ void test_status_codes(void) {
     // Test 404 Not Found
     status = get_http_status(SERVER_URL "/nonexistent_file_12345.html", 0);
     if (status == 404) {
-        printf("  ✓ GET /nonexistent_file_12345.html = %ld (Not Found)\n", status);
+        printf("  - GET /nonexistent_file_12345.html = %ld (Not Found)\n", status);
         tests_passed++;
     } else {
-        printf("  ✗ GET /nonexistent_file_12345.html = %ld (expected 404)\n", status);
+        printf("  - GET /nonexistent_file_12345.html = %ld (expected 404)\n", status);
         tests_failed++;
     }
     tests_run++;
@@ -124,10 +124,10 @@ void test_status_codes(void) {
     // Test HEAD method
     status = get_http_status(SERVER_URL "/", 1);
     if (status == 200) {
-        printf("  ✓ HEAD / = %ld (OK)\n", status);
+        printf("  - HEAD / = %ld (OK)\n", status);
         tests_passed++;
     } else {
-        printf("  ✗ HEAD / = %ld (expected 200)\n", status);
+        printf("  - HEAD / = %ld (expected 200)\n", status);
         tests_failed++;
     }
     tests_run++;
@@ -138,10 +138,10 @@ void test_directory_index(void) {
     
     long status = get_http_status(SERVER_URL "/", 0);
     if (status == 200) {
-        printf("  ✓ Index automatically served for / (HTTP %ld)\n", status);
+        printf("  - Index automatically served for / (HTTP %ld)\n", status);
         tests_passed++;
     } else {
-        printf("  ✗ Index not served (HTTP %ld)\n", status);
+        printf("  - Index not served (HTTP %ld)\n", status);
         tests_failed++;
     }
     tests_run++;
@@ -163,7 +163,7 @@ void test_content_types(void) {
     int skipped = 0;
     for (size_t i = 0; i < sizeof(tests)/sizeof(tests[0]); i++) {
         if (!file_exists(tests[i].local_path)) {
-            printf("  ⊘ %s (skipped - file doesn't exist)\n", tests[i].file);
+            printf("  - %s (skipped - file doesn't exist)\n", tests[i].file);
             skipped++;
             continue;
         }
@@ -173,10 +173,10 @@ void test_content_types(void) {
         char* ct = get_content_type(url);
         
         if (ct && strstr(ct, tests[i].expected_type)) {
-            printf("  ✓ %s → %s\n", tests[i].file, ct);
+            printf("  - %s -> %s\n", tests[i].file, ct);
             tests_passed++;
         } else {
-            printf("  ✗ %s → %s (expected %s)\n", tests[i].file, 
+            printf("  - %s -> %s (expected %s)\n", tests[i].file, 
                    ct ? ct : "NULL", tests[i].expected_type);
             tests_failed++;
         }
@@ -184,7 +184,7 @@ void test_content_types(void) {
     }
     
     if (skipped > 0) {
-        printf("  ℹ %d file(s) skipped (not present in www/)\n", skipped);
+        printf("  - %d file(s) skipped (not present in www/)\n", skipped);
     }
 }
 
@@ -199,7 +199,7 @@ int main(void) {
         fprintf(stderr, "Please start the server first: ./server\n");
         return 1;
     }
-    printf("\n✓ Server is running on %s\n", SERVER_URL);
+    printf("\n- Server is running on %s\n", SERVER_URL);
     
     test_file_types();
     test_status_codes();
@@ -210,8 +210,8 @@ int main(void) {
     printf("FUNCTIONAL TEST SUMMARY\n");
     printf("================================================\n");
     printf("Total Tests Run:  %d\n", tests_run);
-    printf("Tests Passed:     %d ✓\n", tests_passed);
-    printf("Tests Failed:     %d ✗\n", tests_failed);
+    printf("Tests Passed:     %d Passed\n", tests_passed);
+    printf("Tests Failed:     %d Failed\n", tests_failed);
     
     if (tests_run > 0) {
         printf("Success Rate:     %.1f%%\n", (100.0 * tests_passed / tests_run));

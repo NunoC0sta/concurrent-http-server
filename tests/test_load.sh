@@ -20,7 +20,7 @@ NC='\033[0m' # No Color
 # Check if server is running
 check_server() {
     if ! curl -s "$BASE_URL" > /dev/null 2>&1; then
-        echo -e "${RED}ERROR: Server is not running on $BASE_URL${NC}"
+        echo -e "ERROR: Server is not running on $BASE_URL"
         exit 1
     fi
 }
@@ -31,7 +31,7 @@ run_load_test() {
     local concurrent=$2
     local test_path=$3
     
-    echo -e "${YELLOW}Testing with $num_requests requests ($concurrent concurrent)${NC}"
+    echo -e "Testing with $num_requests requests ($concurrent concurrent)"
     
     # Use ab (Apache Bench) if available, otherwise use curl loop
     if command -v ab &> /dev/null; then
@@ -61,10 +61,10 @@ run_load_test() {
 
 # Main test suite
 main() {
-    echo -e "${GREEN}=== Concurrent HTTP Server Load Test ===${NC}\n"
+    echo -e "=== Concurrent HTTP Server Load Test ===\n"
     
     check_server
-    echo -e "${GREEN}✓ Server is running${NC}\n"
+    echo -e "- Server is running\n"
     
     # Clear results file
     > "$RESULTS_FILE"
@@ -74,27 +74,27 @@ main() {
     echo "" >> "$RESULTS_FILE"
     
     # Test 1: Light load
-    echo -e "${YELLOW}[Test 1] Light Load${NC}"
+    echo -e "[Test 1] Light Load"
     run_load_test 10 2 "/"
     sleep 1
     
     # Test 2: Moderate load
-    echo -e "${YELLOW}[Test 2] Moderate Load${NC}"
+    echo -e "[Test 2] Moderate Load"
     run_load_test 50 5 "/"
     sleep 1
     
     # Test 3: Heavy load
-    echo -e "${YELLOW}[Test 3] Heavy Load${NC}"
+    echo -e "[Test 3] Heavy Load"
     run_load_test 100 10 "/"
     sleep 1
     
     # Test 4: Very heavy load
-    echo -e "${YELLOW}[Test 4] Very Heavy Load${NC}"
+    echo -e "[Test 4] Very Heavy Load"
     run_load_test 200 20 "/"
     sleep 1
     
     # Test 5: Mixed requests (GET, HEAD, POST)
-    echo -e "${YELLOW}[Test 5] Mixed Request Types${NC}"
+    echo -e "[Test 5] Mixed Request Types"
     echo "GET requests:" >> "$RESULTS_FILE"
     run_load_test 30 5 "/"
     
@@ -111,21 +111,21 @@ main() {
     
     # Test 6: Large file requests (if exists)
     if curl -s "$BASE_URL/index.html" > /dev/null 2>&1; then
-        echo -e "${YELLOW}[Test 6] File Request Load${NC}"
+        echo -e "[Test 6] File Request Load"
         run_load_test 30 5 "/index.html"
         sleep 1
     fi
     
     # Test 7: Not found errors (404s)
-    echo -e "${YELLOW}[Test 7] 404 Error Load${NC}"
+    echo -e "[Test 7] 404 Error Load"
     run_load_test 20 5 "/nonexistent.html"
     sleep 1
     
     # Display results
-    echo -e "\n${GREEN}=== Test Results Summary ===${NC}"
+    echo -e "\n=== Test Results Summary ==="
     cat "$RESULTS_FILE"
     
-    echo -e "\n${GREEN}✓ Load testing completed${NC}"
+    echo -e "\n- Load testing completed"
     echo "Full results saved to: $RESULTS_FILE"
 }
 

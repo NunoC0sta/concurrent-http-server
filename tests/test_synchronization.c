@@ -76,15 +76,15 @@ void test_valgrind_helgrind(void) {
     int helgrind_available = (system("valgrind --tool=helgrind --version > /dev/null 2>&1") == 0);
     
     if (valgrind_available) {
-        printf("  ✓ Valgrind is installed\n");
+        printf("  - Valgrind is installed\n");
     } else {
-        printf("  ✗ Valgrind not found (install: sudo apt-get install valgrind)\n");
+        printf("  - Valgrind not found (install: sudo apt-get install valgrind)\n");
     }
     
     if (helgrind_available) {
-        printf("  ✓ Helgrind is available\n");
+        printf("  - Helgrind is available\n");
     } else {
-        printf("  X Helgrind not available\n");
+        printf("  - Helgrind not available\n");
     }
     
     printf("\n  Run race detection with:\n");
@@ -185,8 +185,8 @@ void test_log_integrity(void) {
     printf("  Expected: ~100\n");
     
     if (new_entries >= 90 && new_entries <= 110) {
-        printf("  ✓ Log integrity maintained\n");
-        printf("  ✓ Manual check: Verify no garbled/interleaved entries in %s\n", LOG_FILE);
+        printf("  - Log integrity maintained\n");
+        printf("  - Manual check: Verify no garbled/interleaved entries in %s\n", LOG_FILE);
         tests_passed++;
     } else if (new_entries >= 50) {
         printf("  Partial logging detected (%ld/100 entries)\n", new_entries);
@@ -196,8 +196,8 @@ void test_log_integrity(void) {
         printf("    - Buffer flush delays\n");
         tests_failed++;
     } else {
-        printf("  ✗ Logging appears to be failing (only %ld/100 entries)\n", new_entries);
-        printf("  ✗ Check that all workers call logger_init()\n");
+        printf("  - Logging appears to be failing (only %ld/100 entries)\n", new_entries);
+        printf("  - Check that all workers call logger_init()\n");
         tests_failed++;
     }
     tests_run++;
@@ -231,10 +231,10 @@ void test_cache_consistency(void) {
     printf("  Successful: %d\n", stats.successful_requests);
     
     if (stats.successful_requests == stats.total_requests) {
-        printf("  ✓ Cache consistency maintained (no corrupted reads)\n");
+        printf("  - Cache consistency maintained (no corrupted reads)\n");
         tests_passed++;
     } else {
-        printf("  ✗ Cache inconsistency detected\n");
+        printf("  - Cache inconsistency detected\n");
         tests_failed++;
     }
     tests_run++;
@@ -271,10 +271,10 @@ void test_statistics_counters(void) {
     printf("    3. Verify no negative counters or overflow\n");
     
     if (stats.successful_requests >= 95) {
-        printf("  ✓ Statistics counters appear consistent\n");
+        printf("  - Statistics counters appear consistent\n");
         tests_passed++;
     } else {
-        printf("  ✗ Possible lost updates detected\n");
+        printf("  - Possible lost updates detected\n");
         tests_failed++;
     }
     tests_run++;
@@ -293,7 +293,7 @@ int main(void) {
         fprintf(stderr, "Please start the server first: ./server\n");
         return 1;
     }
-    printf("\n✓ Server is running on %s\n", SERVER_URL);
+    printf("\n- Server is running on %s\n", SERVER_URL);
     
     test_valgrind_helgrind();
     test_log_integrity();
@@ -304,8 +304,8 @@ int main(void) {
     printf("SYNCHRONIZATION TEST SUMMARY\n");
     printf("================================================\n");
     printf("Total Tests Run:  %d\n", tests_run);
-    printf("Tests Passed:     %d ✓\n", tests_passed);
-    printf("Tests Failed:     %d ✗\n", tests_failed);
+    printf("Tests Passed:     %d Passed\n", tests_passed);
+    printf("Tests Failed:     %d Failed\n", tests_failed);
     printf("Success Rate:     %.1f%%\n", 
            tests_run > 0 ? (100.0 * tests_passed / tests_run) : 0.0);
     printf("================================================\n");
