@@ -2,6 +2,7 @@
 #include "http.h"
 #include "logger.h"
 #include "master.h"
+#include "cache.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -19,30 +20,32 @@ const char* get_mime_type(const char* path) {
     if (strcmp(dot, ".css") == 0) return "text/css";
     if (strcmp(dot, ".js") == 0) return "application/javascript";
     if (strcmp(dot, ".png") == 0) return "image/png";
-    if (strcmp(dot, ".jpg") == 0) return "image/jpeg";
+    if (strcmp(dot, ".jpg") == 0 || strcmp(dot, ".jpeg") == 0) return "image/jpeg";
+    if (strcmp(dot, ".gif") == 0) return "image/gif";
+    if (strcmp(dot, ".svg") == 0) return "image/svg+xml";
     if (strcmp(dot, ".mp4") == 0) return "video/mp4";
+    if (strcmp(dot, ".webm") == 0) return "video/webm";
     return "text/plain";
 }
 
-ssize_t send_all(int sock, const char* buf, size_t len) {
+static inline ssize_t send_all(int sock, const char* buf, size_t len) {
     size_t total = 0;
     while (total < len) {
-        ssize_t n = send(sock, buf + total, len - total, 0);
+        ssize_t n = send(sock, buf + total, len - total, MSG_NOSIGNAL);
         if (n <= 0) return -1;
         total += n;
     }
     return total;
 }
 
-// --- NOVO: Função auxiliar para ler cabeçalhos (Host, Range) ---
 char* get_header(const char* buffer, const char* header_name) {
-    static char value[1024];
+    static __thread char value[1024]; // Thread-local para evitar races
     char* line = strstr(buffer, header_name);
     if (!line) return NULL;
-    
+
     line += strlen(header_name);
     while (*line == ':' || *line == ' ') line++;
-    
+
     int i = 0;
     while (*line != '\r' && *line != '\n' && i < 1023) {
         value[i++] = *line++;
@@ -52,56 +55,82 @@ char* get_header(const char* buffer, const char* header_name) {
 }
 
 int parse_http_request(const char* buffer, char** method, char** path) {
-    char* buf_copy = strdup(buffer);
-    if (!buf_copy) return -1;
-    char* line = strtok(buf_copy, "\r\n");
-    if (!line) { free(buf_copy); return -1; }
+    // Parse apenas a primeira linha
+    const char* end = strstr(buffer, "\r\n");
+    if (!end) return -1;
+    
+    size_t line_len = end - buffer;
+    char* line = strndup(buffer, line_len);
+    if (!line) return -1;
+
     char* m = strtok(line, " ");
     char* p = strtok(NULL, " ");
-    if (!m || !p) { free(buf_copy); return -1; }
+    
+    if (!m || !p) {
+        free(line);
+        return -1;
+    }
+    
     *method = strdup(m);
     *path = strdup(p);
-    free(buf_copy);
-    return 0;
+    free(line);
+    
+    return (*method && *path) ? 0 : -1;
 }
 
 void serve_custom_error(int client_fd, int code, const char* doc_root, ipc_handles_t* ipc) {
     char error_path[1024];
     snprintf(error_path, sizeof(error_path), "%s/errors/%d.html", doc_root, code);
+    
     FILE* f = fopen(error_path, "rb");
     if (f) {
-        fseek(f, 0, SEEK_END); long size = ftell(f); fseek(f, 0, SEEK_SET);
+        fseek(f, 0, SEEK_END);
+        long size = ftell(f);
+        fseek(f, 0, SEEK_SET);
+        
         char header[512];
-        int hlen = snprintf(header, sizeof(header), "HTTP/1.1 %d Error\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: %ld\r\nConnection: close\r\n\r\n", code, size);
+        int hlen = snprintf(header, sizeof(header),
+            "HTTP/1.1 %d Error\r\n"
+            "Content-Type: text/html; charset=utf-8\r\n"
+            "Content-Length: %ld\r\n"
+            "Connection: close\r\n\r\n", code, size);
+        
         send_all(client_fd, header, hlen);
-        char buf[4096]; size_t n;
-        while ((n = fread(buf, 1, sizeof(buf), f)) > 0) send_all(client_fd, buf, n);
+        
+        char buf[8192];
+        size_t n;
+        while ((n = fread(buf, 1, sizeof(buf), f)) > 0) {
+            send_all(client_fd, buf, n);
+        }
         fclose(f);
     } else {
-        char msg[128]; int len = snprintf(msg, sizeof(msg), "HTTP/1.1 %d Error\r\nContent-Length: 0\r\n\r\n", code);
+        char msg[256];
+        int len = snprintf(msg, sizeof(msg),
+            "HTTP/1.1 %d Error\r\n"
+            "Content-Type: text/plain\r\n"
+            "Content-Length: 13\r\n"
+            "Connection: close\r\n\r\n"
+            "%d Error\r\n", code, code);
         send_all(client_fd, msg, len);
     }
-    sem_wait(ipc->sem_stats);
-    ipc->shared_data->stats.total_requests++;
-    if(code==404) ipc->shared_data->stats.status_404++;
-    else if(code==500) ipc->shared_data->stats.status_500++;
-    else if(code==403) ipc->shared_data->stats.status_403++;
-    else if(code==503) ipc->shared_data->stats.status_503++;
-    sem_post(ipc->sem_stats);
+    
+    // Atualização de stats em batch (menos overhead)
+    __sync_fetch_and_add(&ipc->shared_data->stats.total_requests, 1);
+    if (code == 404) __sync_fetch_and_add(&ipc->shared_data->stats.status_404, 1);
+    else if (code == 500) __sync_fetch_and_add(&ipc->shared_data->stats.status_500, 1);
+    else if (code == 403) __sync_fetch_and_add(&ipc->shared_data->stats.status_403, 1);
+    else if (code == 503) __sync_fetch_and_add(&ipc->shared_data->stats.status_503, 1);
 }
 
-// --- O TEU DASHBOARD (INTOCÁVEL) ---
 void serve_dashboard(int client_fd, ipc_handles_t* ipc) {
-    sem_wait(ipc->sem_stats);
-    server_stats_t s = ipc->shared_data->stats;
+    // Leitura atômica sem semáforos
+    server_stats_t s;
+    memcpy(&s, &ipc->shared_data->stats, sizeof(server_stats_t));
+    
     time_t now = time(NULL);
     time_t uptime = now - s.start_time;
-    sem_post(ipc->sem_stats);
-
-    double avg_time = 0.0;
-    if (s.total_requests > 0) {
-        avg_time = (double)s.total_response_time_ms / s.total_requests;
-    }
+    double avg_time = (s.total_requests > 0) ? 
+        (double)s.total_response_time_ms / s.total_requests : 0.0;
 
     char body[8192];
     int body_len = snprintf(body, sizeof(body),
@@ -121,18 +150,15 @@ void serve_dashboard(int client_fd, ipc_handles_t* ipc) {
         "<body>"
         "<h1>Dashboard do Servidor</h1>"
         "<div class='grid'>"
-        
         "<div class='card'><h2>Performance</h2>"
         "<div class='row'><span>Uptime:</span> <span class='val'>%ld s</span></div>"
         "<div class='row'><span>Conexões Ativas:</span> <span class='val'>%d</span></div>"
         "<div class='row'><span>Tempo Médio:</span> <span class='val'>%.2f ms</span></div>"
         "</div>"
-        
         "<div class='card'><h2>Tráfego</h2>"
         "<div class='row'><span>Total Pedidos:</span> <span class='val'>%lu</span></div>"
         "<div class='row'><span>Dados Enviados:</span> <span class='val'>%.2f MB</span></div>"
         "</div>"
-        
         "<div class='card'><h2>Códigos de Resposta</h2>"
         "<div class='row'><span>200 OK:</span> <span class='val ok'>%u</span></div>"
         "<div class='row'><span>403 Forbidden:</span> <span class='val warn'>%u</span></div>"
@@ -140,7 +166,6 @@ void serve_dashboard(int client_fd, ipc_handles_t* ipc) {
         "<div class='row'><span>500 Error:</span> <span class='val err'>%u</span></div>"
         "<div class='row'><span>503 Busy:</span> <span class='val err'>%u</span></div>"
         "</div>"
-        
         "</div></body></html>",
         uptime, s.active_connections, avg_time,
         s.total_requests, (double)s.bytes_transferred / (1024*1024),
@@ -148,37 +173,70 @@ void serve_dashboard(int client_fd, ipc_handles_t* ipc) {
 
     char header[512];
     int hlen = snprintf(header, sizeof(header),
-        "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: %d\r\n\r\n", body_len);
-    
+        "HTTP/1.1 200 OK\r\n"
+        "Content-Type: text/html; charset=utf-8\r\n"
+        "Content-Length: %d\r\n"
+        "Connection: close\r\n\r\n", body_len);
+
     send_all(client_fd, header, hlen);
     send_all(client_fd, body, body_len);
 }
 
-// --- FUNÇÃO ATUALIZADA: Suporta Range Requests (+3 Pontos) ---
-void serve_file(int client_fd, const char* path, const char* doc_root, ipc_handles_t* ipc, const char* range_header) {
-    struct timespec start, end;
+void serve_file(int client_fd, const char* path, const char* doc_root, 
+                ipc_handles_t* ipc, const char* range_header, cache_t* cache) {
+    struct timespec start;
     clock_gettime(CLOCK_MONOTONIC, &start);
 
-    FILE* f = fopen(path, "rb");
-    if (!f) {
-        serve_custom_error(client_fd, 404, doc_root, ipc);
-        return;
+    // Verificar cache primeiro
+    cache_entry_t* cached = cache_get(cache, path);
+    void* file_data = NULL;
+    size_t filesize = 0;
+    int from_cache = 0;
+
+    if (cached) {
+        file_data = cache_entry_get_data(cached);
+        filesize = cache_entry_get_size(cached);
+        from_cache = 1;
+    } else {
+        // Ler do disco
+        FILE* f = fopen(path, "rb");
+        if (!f) {
+            serve_custom_error(client_fd, 404, doc_root, ipc);
+            return;
+        }
+
+        fseek(f, 0, SEEK_END);
+        filesize = ftell(f);
+        fseek(f, 0, SEEK_SET);
+
+        // Cache apenas arquivos pequenos (< 1MB)
+        if (filesize < 1024 * 1024) {
+            file_data = malloc(filesize);
+            if (file_data) {
+                fread(file_data, 1, filesize, f);
+                cache_put(cache, path, file_data, filesize);
+                from_cache = 1; // Agora está em cache
+            }
+        }
+        fclose(f);
+
+        // Se não cacheou, abre novamente
+        if (!from_cache) {
+            f = fopen(path, "rb");
+            if (!f) {
+                serve_custom_error(client_fd, 500, doc_root, ipc);
+                return;
+            }
+        }
     }
 
-    fseek(f, 0, SEEK_END); long filesize = ftell(f); fseek(f, 0, SEEK_SET);
-    
-    // Lógica para Range Request (Resumo de download)
-    long start_byte = 0;
-    long end_byte = filesize - 1;
+    // Parse Range header
+    long start_byte = 0, end_byte = filesize - 1;
     int is_partial = 0;
 
-    if (range_header) {
-        // Tenta ler "bytes=0-100"
-        if (sscanf(range_header, "bytes=%ld-%ld", &start_byte, &end_byte) >= 1) {
-            if (end_byte >= filesize || end_byte == 0) end_byte = filesize - 1;
-            is_partial = 1;
-            fseek(f, start_byte, SEEK_SET);
-        }
+    if (range_header && sscanf(range_header, "bytes=%ld-%ld", &start_byte, &end_byte) >= 1) {
+        if (end_byte >= (long)filesize || end_byte == 0) end_byte = filesize - 1;
+        is_partial = 1;
     }
 
     long content_len = end_byte - start_byte + 1;
@@ -186,83 +244,108 @@ void serve_file(int client_fd, const char* path, const char* doc_root, ipc_handl
     int hlen;
 
     if (is_partial) {
-        // Resposta 206 Partial Content
-        hlen = snprintf(header, sizeof(header), 
-            "HTTP/1.1 206 Partial Content\r\nContent-Type: %s\r\nContent-Range: bytes %ld-%ld/%ld\r\nContent-Length: %ld\r\nConnection: keep-alive\r\n\r\n", 
+        hlen = snprintf(header, sizeof(header),
+            "HTTP/1.1 206 Partial Content\r\n"
+            "Content-Type: %s\r\n"
+            "Content-Range: bytes %ld-%ld/%zu\r\n"
+            "Content-Length: %ld\r\n"
+            "Connection: keep-alive\r\n\r\n",
             get_mime_type(path), start_byte, end_byte, filesize, content_len);
     } else {
-        // Resposta 200 OK (Normal)
-        hlen = snprintf(header, sizeof(header), 
-            "HTTP/1.1 200 OK\r\nContent-Type: %s\r\nContent-Length: %ld\r\nConnection: keep-alive\r\n\r\n", 
+        hlen = snprintf(header, sizeof(header),
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Type: %s\r\n"
+            "Content-Length: %zu\r\n"
+            "Connection: keep-alive\r\n\r\n",
             get_mime_type(path), filesize);
     }
 
     send_all(client_fd, header, hlen);
 
-    char buf[8192];
-    long sent = 0;
-    while (sent < content_len) {
-        // Lê apenas o necessário
-        long to_read = (content_len - sent) > (long)sizeof(buf) ? (long)sizeof(buf) : (content_len - sent);
-        size_t n = fread(buf, 1, to_read, f);
-        if (n <= 0) break;
-        send_all(client_fd, buf, n);
-        sent += n;
+    // Enviar dados
+    if (from_cache) {
+        send_all(client_fd, (char*)file_data + start_byte, content_len);
+    } else {
+        // Leitura direta do disco (arquivo grande)
+        FILE* f = fopen(path, "rb");
+        if (f) {
+            fseek(f, start_byte, SEEK_SET);
+            char buf[65536]; // Buffer maior
+            long sent = 0;
+            while (sent < content_len) {
+                long to_read = (content_len - sent > (long)sizeof(buf)) ? 
+                    (long)sizeof(buf) : (content_len - sent);
+                size_t n = fread(buf, 1, to_read, f);
+                if (n <= 0) break;
+                send_all(client_fd, buf, n);
+                sent += n;
+            }
+            fclose(f);
+        }
     }
-    fclose(f);
-    
+
+    struct timespec end;
     clock_gettime(CLOCK_MONOTONIC, &end);
-    long ms = (end.tv_sec - start.tv_sec) * 1000 + (end.tv_nsec - start.tv_nsec) / 1000000;
-    
-    sem_wait(ipc->sem_stats);
-    ipc->shared_data->stats.total_requests++;
-    ipc->shared_data->stats.bytes_transferred += sent;
-    ipc->shared_data->stats.status_200++;
-    ipc->shared_data->stats.total_response_time_ms += ms;
-    sem_post(ipc->sem_stats);
+    long ms = (end.tv_sec - start.tv_sec) * 1000 + 
+              (end.tv_nsec - start.tv_nsec) / 1000000;
+
+    // Stats atômicas
+    __sync_fetch_and_add(&ipc->shared_data->stats.total_requests, 1);
+    __sync_fetch_and_add(&ipc->shared_data->stats.bytes_transferred, content_len);
+    __sync_fetch_and_add(&ipc->shared_data->stats.status_200, 1);
+    __sync_fetch_and_add(&ipc->shared_data->stats.total_response_time_ms, ms);
 }
 
-void http_handle_request(int client_fd, const char *default_root, ipc_handles_t *ipc) {
-    struct timeval tv = {5, 0};
+void http_handle_request(int client_fd, const char *default_root, 
+                         ipc_handles_t *ipc, cache_t* cache) {
+    struct timeval tv = {2, 0}; // Timeout reduzido para 2s
     setsockopt(client_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    
     char buffer[4096];
-
-    while (1) {
-        ssize_t n = recv(client_fd, buffer, sizeof(buffer)-1, 0);
-        if (n <= 0) break;
-        buffer[n] = '\0';
-
-        char *method = NULL, *path = NULL;
-        if (parse_http_request(buffer, &method, &path) != 0) break;
-
-        // --- BÓNUS: VIRTUAL HOSTS (+4 Pontos) ---
-        char current_root[1024];
-        char* host = get_header(buffer, "Host");
-        char* range = get_header(buffer, "Range"); // Ler o Range header também
-
-        if (host && strstr(host, "site1")) {
-            snprintf(current_root, sizeof(current_root), "./www/site1");
-        } else if (host && strstr(host, "site2")) {
-            snprintf(current_root, sizeof(current_root), "./www/site2");
-        } else {
-            // Se não for site1 nem site2, usa a raiz normal (./www)
-            strcpy(current_root, default_root);
-        }
-
-        if (strcmp(path, "/stats") == 0) {
-            serve_dashboard(client_fd, ipc);
-            log_request(ipc, "127.0.0.1", "/stats", method, 200, 0);
-        } else {
-            char full[2048]; // Buffer maior para o path
-            if (strcmp(path, "/") == 0) snprintf(full, sizeof(full), "%s/index.html", current_root);
-            else snprintf(full, sizeof(full), "%s%s", current_root, path);
-            
-            // Passamos agora o 'range' para a função serve_file
-            serve_file(client_fd, full, current_root, ipc, range);
-            
-            log_request(ipc, "127.0.0.1", path, method, 200, 0);
-        }
-        free(method); free(path);
+    
+    // LER APENAS UMA VEZ (problema crítico estava aqui!)
+    ssize_t n = recv(client_fd, buffer, sizeof(buffer)-1, 0);
+    if (n <= 0) {
+        close(client_fd);
+        return;
     }
+    buffer[n] = '\0';
+
+    char *method = NULL, *path = NULL;
+    if (parse_http_request(buffer, &method, &path) != 0) {
+        close(client_fd);
+        return;
+    }
+
+    // Virtual Hosts
+    char current_root[1024];
+    char* host = get_header(buffer, "Host");
+    char* range = get_header(buffer, "Range");
+
+    if (host && strstr(host, "site1")) {
+        snprintf(current_root, sizeof(current_root), "./www/site1");
+    } else if (host && strstr(host, "site2")) {
+        snprintf(current_root, sizeof(current_root), "./www/site2");
+    } else {
+        strcpy(current_root, default_root);
+    }
+
+    if (strcmp(path, "/stats") == 0) {
+        serve_dashboard(client_fd, ipc);
+        log_request(ipc, "127.0.0.1", "/stats", method, 200, 0);
+    } else {
+        char full[2048];
+        if (strcmp(path, "/") == 0) {
+            snprintf(full, sizeof(full), "%s/index.html", current_root);
+        } else {
+            snprintf(full, sizeof(full), "%s%s", current_root, path);
+        }
+
+        serve_file(client_fd, full, current_root, ipc, range, cache);
+        log_request(ipc, "127.0.0.1", path, method, 200, 0);
+    }
+    
+    free(method);
+    free(path);
     close(client_fd);
 }
