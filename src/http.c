@@ -14,6 +14,7 @@
 #include <ctype.h>
 
 const char* get_mime_type(const char* path) {
+    // Hardcoded é mais rápido e simples que hash tables para isto
     char *dot = strrchr(path, '.');
     if (!dot) return "application/octet-stream";
     if (strcmp(dot, ".html") == 0) return "text/html";
@@ -31,6 +32,8 @@ const char* get_mime_type(const char* path) {
 static inline ssize_t send_all(int sock, const char* buf, size_t len) {
     size_t total = 0;
     while (total < len) {
+        // Loop necessário pq o TCP pode fragmentar o envio
+        // MSG_NOSIGNAL evita crash se o cliente fechar a conexão
         ssize_t n = send(sock, buf + total, len - total, MSG_NOSIGNAL);
         if (n <= 0) return -1;
         total += n;
@@ -39,7 +42,8 @@ static inline ssize_t send_all(int sock, const char* buf, size_t len) {
 }
 
 char* get_header(const char* buffer, const char* header_name) {
-    static __thread char value[1024]; // Thread-local para evitar races
+    // Cada thread tem seu buffer estático (evita locks e mallocs)
+    static __thread char value[1024]; 
     char* line = strstr(buffer, header_name);
     if (!line) return NULL;
 
@@ -55,7 +59,7 @@ char* get_header(const char* buffer, const char* header_name) {
 }
 
 int parse_http_request(const char* buffer, char** method, char** path) {
-    // Parse apenas a primeira linha
+    // Só processa a 1 linha 
     const char* end = strstr(buffer, "\r\n");
     if (!end) return -1;
     
@@ -82,6 +86,7 @@ void serve_custom_error(int client_fd, int code, const char* doc_root, ipc_handl
     char error_path[1024];
     snprintf(error_path, sizeof(error_path), "%s/errors/%d.html", doc_root, code);
     
+    // Tenta ficheiro HTML personalizado, senão usa texto simples
     FILE* f = fopen(error_path, "rb");
     if (f) {
         fseek(f, 0, SEEK_END);
@@ -114,7 +119,7 @@ void serve_custom_error(int client_fd, int code, const char* doc_root, ipc_handl
         send_all(client_fd, msg, len);
     }
     
-    // Atualização de stats em batch (menos overhead)
+    // Stats atômicas
     __sync_fetch_and_add(&ipc->shared_data->stats.total_requests, 1);
     if (code == 404) __sync_fetch_and_add(&ipc->shared_data->stats.status_404, 1);
     else if (code == 500) __sync_fetch_and_add(&ipc->shared_data->stats.status_500, 1);
@@ -123,7 +128,7 @@ void serve_custom_error(int client_fd, int code, const char* doc_root, ipc_handl
 }
 
 void serve_dashboard(int client_fd, ipc_handles_t* ipc) {
-    // Leitura atômica sem semáforos
+    // Copia local para não bloquear leitura enquanto gera o HTML
     server_stats_t s;
     memcpy(&s, &ipc->shared_data->stats, sizeof(server_stats_t));
     
@@ -182,12 +187,11 @@ void serve_dashboard(int client_fd, ipc_handles_t* ipc) {
     send_all(client_fd, body, body_len);
 }
 
-void serve_file(int client_fd, const char* path, const char* doc_root, 
-                ipc_handles_t* ipc, const char* range_header, cache_t* cache) {
+void serve_file(int client_fd, const char* path, const char* doc_root, ipc_handles_t* ipc, const char* range_header, cache_t* cache) {
     struct timespec start;
     clock_gettime(CLOCK_MONOTONIC, &start);
 
-    // Verificar cache primeiro
+    // Tenta Cache
     cache_entry_t* cached = cache_get(cache, path);
     void* file_data = NULL;
     size_t filesize = 0;
@@ -198,7 +202,7 @@ void serve_file(int client_fd, const char* path, const char* doc_root,
         filesize = cache_entry_get_size(cached);
         from_cache = 1;
     } else {
-        // Ler do disco
+        // Se falhar, Disco
         FILE* f = fopen(path, "rb");
         if (!f) {
             serve_custom_error(client_fd, 404, doc_root, ipc);
@@ -209,18 +213,17 @@ void serve_file(int client_fd, const char* path, const char* doc_root,
         filesize = ftell(f);
         fseek(f, 0, SEEK_SET);
 
-        // Cache apenas arquivos pequenos (< 1MB)
+        // Só mete em cache ficheiros pequenos (<1MB)
         if (filesize < 1024 * 1024) {
             file_data = malloc(filesize);
             if (file_data) {
                 fread(file_data, 1, filesize, f);
                 cache_put(cache, path, file_data, filesize);
-                from_cache = 1; // Agora está em cache
+                from_cache = 1; 
             }
         }
         fclose(f);
 
-        // Se não cacheou, abre novamente
         if (!from_cache) {
             f = fopen(path, "rb");
             if (!f) {
@@ -230,7 +233,6 @@ void serve_file(int client_fd, const char* path, const char* doc_root,
         }
     }
 
-    // Parse Range header
     long start_byte = 0, end_byte = filesize - 1;
     int is_partial = 0;
 
@@ -262,15 +264,16 @@ void serve_file(int client_fd, const char* path, const char* doc_root,
 
     send_all(client_fd, header, hlen);
 
-    // Enviar dados
+    // Envio dos dados
     if (from_cache) {
+        // Direto da RAM
         send_all(client_fd, (char*)file_data + start_byte, content_len);
     } else {
-        // Leitura direta do disco (arquivo grande)
+        // Leitura do disco em chunks (64KB)
         FILE* f = fopen(path, "rb");
         if (f) {
             fseek(f, start_byte, SEEK_SET);
-            char buf[65536]; // Buffer maior
+            char buf[65536]; 
             long sent = 0;
             while (sent < content_len) {
                 long to_read = (content_len - sent > (long)sizeof(buf)) ? 
@@ -289,21 +292,21 @@ void serve_file(int client_fd, const char* path, const char* doc_root,
     long ms = (end.tv_sec - start.tv_sec) * 1000 + 
               (end.tv_nsec - start.tv_nsec) / 1000000;
 
-    // Stats atômicas
+    // Atualiza stats
     __sync_fetch_and_add(&ipc->shared_data->stats.total_requests, 1);
     __sync_fetch_and_add(&ipc->shared_data->stats.bytes_transferred, content_len);
     __sync_fetch_and_add(&ipc->shared_data->stats.status_200, 1);
     __sync_fetch_and_add(&ipc->shared_data->stats.total_response_time_ms, ms);
 }
 
-void http_handle_request(int client_fd, const char *default_root, 
-                         ipc_handles_t *ipc, cache_t* cache) {
-    struct timeval tv = {2, 0}; // Timeout reduzido para 2s
+void http_handle_request(int client_fd, const char *default_root, ipc_handles_t *ipc, cache_t* cache) {
+    // Timeout 2s
+    struct timeval tv = {2, 0}; 
     setsockopt(client_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
     
     char buffer[4096];
     
-    // LER APENAS UMA VEZ (problema crítico estava aqui!)
+    // Leitura única para simplificar
     ssize_t n = recv(client_fd, buffer, sizeof(buffer)-1, 0);
     if (n <= 0) {
         close(client_fd);
@@ -317,7 +320,7 @@ void http_handle_request(int client_fd, const char *default_root,
         return;
     }
 
-    // Virtual Hosts
+    // Virtual Hosts (site1 vs site2)
     char current_root[1024];
     char* host = get_header(buffer, "Host");
     char* range = get_header(buffer, "Range");

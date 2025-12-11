@@ -3,7 +3,7 @@
 
 typedef struct {
     int port;
-    char document_root[256];
+    char document_root[256]; // Buffer fixo para simplificar
     int num_workers;
     int threads_per_worker;
     int max_queue_size;
@@ -12,6 +12,7 @@ typedef struct {
     int timeout_seconds;
 } server_config_t;
 
+// Lê o ficheiro e preenche a struct. Retorna -1 em caso de erro
 int load_config(const char* filename, server_config_t* config);
 
 #endif

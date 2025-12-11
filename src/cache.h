@@ -4,26 +4,26 @@
 #include <stddef.h>
 #include <pthread.h>
 
-/* Opaque cache types */
+// Tipos opacos.
 typedef struct cache cache_t;
 typedef struct cache_entry cache_entry_t;
 
-/* Initialize cache with maximum size in MB */
+// Inicializa a estrutura da cache
 cache_t* cache_init(size_t max_size_mb);
 
-/* Get entry from cache (returns NULL if not found) */
+// Tenta encontrar uma entrada na cache através da chave
 cache_entry_t* cache_get(cache_t *cache, const char *key);
 
-/* Add or update entry in cache */
+// Adiciona um novo item à cache. Se a chave já existir, atualiza os dados e o tamanho
 void cache_put(cache_t *cache, const char *key, void *data, size_t size);
 
-/* Get data pointer from cache entry */
+// Função auxiliar para aceder aos dados da entrada
 void* cache_entry_get_data(cache_entry_t *entry);
 
-/* Get size from cache entry */
+// Helper para obter o tamanho dos dados guardados numa entrada
 size_t cache_entry_get_size(cache_entry_t *entry);
 
-/* Destroy cache and free all resources */
+// Limpa toda a memória alocada e destrói os locks/recursos associados
 void cache_destroy(cache_t *cache);
 
-#endif // CACHE_H
+#endif
